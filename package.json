@@ -1,7 +1,7 @@
 {
     "name": "logseq-block-ref-enhancer",
-    "version": "1.0.0",
-    "description": "Render Logseq-style block references in Obsidian.",
+    "version": "1.0.1",
+    "description": "View Logseq-style block references and block embeds inside Obsidian.",
     "main": "main.js",
     "scripts": {
         "dev": "node esbuild.config.mjs",
@@ -9,8 +9,13 @@
         "version": "node version-bump.mjs && git add manifest.json versions.json"
     },
     "keywords": [],
-    "author": "",
+    "author": "msjsc001",
     "license": "MIT",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/msjsc001/Obsidian-Logseq-block-enhancer.git"
+    },
+    "homepage": "https://github.com/msjsc001/Obsidian-Logseq-block-enhancer",
     "devDependencies": {
         "@codemirror/language": "^6.10.1",
         "@codemirror/view": "^6.26.3",

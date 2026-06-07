@@ -1,108 +1,111 @@
-# Obsidian Logseq 块引用增强插件
+# Obsidian Logseq Block Enhancer
 
-一个旨在将 Logseq 强大的块引用能力带入 Obsidian 的插件。
+[English README](./README.en.md)
 
-本项目提供了一套健壮的后台系统和编辑器工具，用于在 Obsidian 中处理 Logseq 风格的 `((...))` 块引用。
+在 Obsidian 中查看 Logseq 风格块引用与块嵌入的插件。
 
----
+当前版本的定位更接近一个“查看器”：
+- 普通块引用 `((uuid))` 会在 Reading Mode 和 Live Preview 中显示为行内摘要。
+- 块嵌入 `{{embed ((uuid))}}` 会在 Reading Mode 和 Live Preview 中显示完整块内容与子级。
+- 原始 Markdown 不会被改写。
 
-> **✅ 当前状态：功能完善，接近完美**
->
-> 经过一系列深入的调试和架构重构，本插件的核心功能现已**完全可用**。
->
-> - **阅读模式 (Reading Mode)**: **完美运行！** 块引用可以被正确渲染，并带有清晰的边框和背景样式。
-> - **实时预览 (Live Preview)**: **成功渲染！** 我们已经攻克了最困难的技术瓶颈，现在可以在实时预览模式下成功渲染块引用。
-> - **已知的小问题**: 实时预览下的渲染样式（如边距、字体、列表项对齐、段落间距）与阅读模式不完全一致；不同主题下表现差异明显。当前版本优先保证正确渲染，视觉统一将于后续版本优化。
+## 当前可以做什么
 
----
+- 在 Reading Mode 中查看：
+  - 普通块引用 `((uuid))`
+  - 块嵌入 `{{embed ((uuid))}}`
+- 在 Live Preview 中查看：
+  - 普通块引用 `((uuid))` 的行内摘要
+  - 块嵌入 `{{embed ((uuid))}}` 的完整渲染内容
+- 在编辑器中输入 `((` 使用块自动补全
+- 使用命令复制当前块的 Logseq 块引用
+- 自动扫描库内 Markdown 文件，建立索引并使用本地缓存
 
-## 🚀 主要功能
+## 当前达到的效果
 
-- **可视化块引用渲染**:
-    - **阅读模式**: 完美、稳定地将 `((...))` 渲染为带样式的块内容。
-    - **实时预览**: 在您打字时，动态地将 `((...))` 替换为渲染好的内容。
+- 普通块引用 `((uuid))` 不再强制独占一行，而是以更适合 Obsidian 的行内方式显示
+- 块嵌入 `{{embed ((uuid))}}` 会继续显示完整内容和子级，适合作为查看器使用
+- Reading Mode 的显示已经比较稳定
+- Live Preview 已经可用，复杂列表和不同主题下仍可能有细微样式差异
 
-- **健壮的索引引擎**:
-    - **全库扫描**: 自动扫描您的整个库，解析并索引所有 Logseq 风格的块、ID 和层级关系。
-    - **增量更新**: 实时监控文件变动，并高效地更新索引。
-    - **持久化缓存**: 索引被缓存在本地，实现 Obsidian 的近乎秒级的启动速度。
+## 安装与使用
 
-- **编辑器命令与自动补全**:
-    - **复制块引用**: 使用“复制当前块的 Logseq 引用”命令，可以智能地为任何块创建 `((UUID))` 引用。
-    - **块自动补全**: 只需在编辑器中输入 `((`，即可触发一个强大的搜索弹窗，在您的整个库中查找并插入任何块的引用。
+适合普通用户的手动安装方式：
 
-## 安装指南
+1. 打开你的 Obsidian 库目录
+2. 进入 `.obsidian/plugins/`
+3. 新建一个文件夹，名字使用插件 ID：`logseq-block-ref-enhancer`
+4. 将仓库中的这三个文件复制进去：
+   - `main.js`
+   - `manifest.json`
+   - `styles.css`
+5. 回到 Obsidian，打开“设置” -> “第三方插件”
+6. 打开 `Logseq Block Ref Enhancer`
 
-#### 1. 构建插件
+启用后就可以直接查看：
+- `((uuid))`
+- `{{embed ((uuid))}}`
 
-本项目包含需要被编译成可用插件的源代码。
+## 常用功能
 
-1.  **安装依赖**: 在本项目的根目录下打开终端，并运行 `npm install` 命令。
-2.  **构建**: 运行 `npm run build` 命令。这将会创建最终所需的 `main.js` 和 `styles.css` 文件。
+### 1. 普通块引用
 
-#### 2. 在 Obsidian 中安装
+在笔记中写入：
 
-1.  进入您 Obsidian 库的插件目录：`.obsidian/plugins/`。
-2.  创建一个名为 `logseq-block-ref-enhancer` 的新文件夹。
-3.  将本项目根目录下的 `main.js`, `manifest.json`, 和 `styles.css` 这三个文件复制到刚刚创建的 `logseq-block-ref-enhancer` 文件夹中。
-4.  重启 Obsidian，进入 `设置` > `第三方插件`，然后启用“Logseq Block Ref Enhancer”插件。
-
-## 使用方法
-
-安装并启用后，插件的渲染功能将自动生效。您还可以使用以下辅助工具：
-
-#### 复制块引用命令
-1.  将光标放在任何以 `- ` 开头的行（即一个块）上。
-2.  打开命令面板 (`Ctrl/Cmd + P`)。
-3.  搜索并执行 “**Copy current block's Logseq reference**” (复制当前块的 Logseq 引用) 命令。
-4.  `((UUID))` 格式的引用会被复制到您的剪贴板。如果该块没有 ID，插件会自动为您添加一个。
-
-#### 自动补全
-1.  在编辑器中，输入 `((`。
-2.  一个搜索弹窗将会出现。开始输入关键词以按内容筛选块。
-3.  使用方向键和 `回车键` 来选择并插入块引用。
-
----
-
-## 已知问题
-
-- 实时预览（Live Preview）与阅读模式（Reading Mode）在样式上仍存在差异：边距、字体、列表项对齐、段落间距等。不同主题可能放大或缩小这种差异。
-- 当前版本优先保证块引用在两种模式下都能正确渲染与稳定工作；视觉统一将在后续版本继续推进。
-- 临时建议：
-  - 若需最稳定的视觉呈现，请切换到阅读模式查看；
-  - 若使用第三方主题，若出现明显偏差，可尝试默认主题以做对比；
-  - 如遇到列表中块引用的对齐或留白问题，可暂以阅读模式查看。
-
----
-
-## 致开发者：最终架构与心得
-
-我们最初遇到的渲染瓶颈，源于对 Obsidian/CodeMirror 6 渲染机制的深层误解。在经历了多次失败的尝试后，我们最终采用了一套专家级的、基于 CodeMirror 6 核心设计哲学的异步渲染架构。
-
-**最终解决方案的核心是“状态与副作用分离”**:
-- **阅读模式**: 采用了基于 `registerMarkdownPostProcessor` 的稳健实现。通过 `TreeWalker` 进行精确的 DOM 节点遍历和替换，并利用 `MarkdownRenderChild` 进行严格的生命周期管理，从根本上解决了样式污染和内存泄漏的风险。
-- **实时预览模式**: 采用了 CodeMirror 6 的终极范式：`StateField` + `ViewPlugin` 的协同工作模式。
-    - **`StateField`**: 作为唯一的“状态真理之源”，纯粹地管理所有块引用的状态（“加载中”或“已渲染”）。
-    - **`ViewPlugin`**: 作为“副作用引擎”，负责观察视图、发起异步的 `MarkdownRenderer` 调用，并通过 `StateEffect` 消息将渲染结果安全地送回 `StateField` 进行状态更新。
-    - **`WidgetType`**: 作为一个纯粹的“视图模板”，只根据 `StateField` 提供的状态来渲染对应的外观。
-
-这个架构虽然复杂，但它完美地解决了所有异步渲染、状态管理和性能优化（如防抖、任务取消）的难题。
-
-#### 最终项目文件结构
+```md
+((xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx))
 ```
-.
-├── src/
-│   ├── editor/
-│   │   ├── AsyncBlockRendererPlugin.ts # ✅ [正常工作] 实时预览的核心：ViewPlugin 引擎
-│   │   ├── BlockReferenceField.ts    # ✅ [正常工作] 实时预览的核心：StateField 状态容器
-│   │   ├── BlockReferenceWidget.ts   # ✅ [正常工作] 实时预览的核心：WidgetType 视图模板
-│   │   └── BlockSuggest.ts           # ✅ [正常工作] `((` 自动补全
-│   ├── services/
-│   │   ├── BlockParser.ts            # ✅ [正常工作] Markdown块解析器
-│   │   └── IndexService.ts           # ✅ [正常工作] 索引、缓存和文件监控服务
-│   ├── types.ts                      # ✅ [正常工作] TypeScript类型定义
-│   └── main.ts                       # ✅ [正常工作] 插件主入口，负责组装所有模块
-├── main.js                           # (由 `npm run build` 生成)
-├── manifest.json                     # Obsidian 插件清单
-├── package.json                      # 项目依赖与脚本
-└── styles.css                        # 插件的 CSS 样式
+
+插件会尽量把它显示成目标块第一行的行内摘要。
+
+### 2. 块嵌入
+
+在笔记中写入：
+
+```md
+{{embed ((xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx))}}
+```
+
+插件会显示目标块的完整内容和子级。
+
+### 3. 复制当前块引用
+
+将光标放到一个无序列表块上，打开命令面板并执行：
+
+`Copy current block's Logseq reference`
+
+如果当前块还没有 `id:: uuid`，插件会自动补上，再把 `((uuid))` 复制到剪贴板。
+
+### 4. 块自动补全
+
+在编辑器中输入：
+
+```md
+((
+```
+
+会触发块搜索和自动补全。
+
+## 开发
+
+```bash
+npm install
+npm run build
+```
+
+构建产物是：
+- `main.js`
+- `manifest.json`
+- `styles.css`
+
+## 已知情况
+
+- 这个插件现在更偏向“Logseq 语法查看器”，而不是完整的 Logseq 编辑体验
+- Live Preview 下，复杂列表、较长嵌入内容、不同主题样式之间，仍可能存在少量视觉差异
+- Reading Mode 通常会比 Live Preview 更稳定
+
+## 路线图
+
+后续计划会逐步支持：在 Obsidian 的某一个无序列表块上直接建立独立 UUID，用来做真正的块引用和块嵌入。
+
+除此之外，后面还会继续补充更多与块引用、块嵌入相关的能力，但节奏和范围会按实际使用情况逐步推进。

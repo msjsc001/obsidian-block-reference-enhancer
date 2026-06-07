@@ -3,9 +3,9 @@
     "name": "Logseq Block Ref Enhancer",
     "version": "1.0.1",
     "minAppVersion": "0.15.0",
-    "description": "Seamlessly create, view, and interact with Logseq-style block references in Obsidian.",
-    "author": "Your Name",
-    "authorUrl": "",
+    "description": "View Logseq-style block references and block embeds inside Obsidian.",
+    "author": "msjsc001",
+    "authorUrl": "https://github.com/msjsc001",
     "fundingUrl": "",
     "isDesktopOnly": false
 }

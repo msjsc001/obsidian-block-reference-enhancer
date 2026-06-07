@@ -1,9 +1,34 @@
-.logseq-block-embed, .logseq-block-ref-enhancer-widget {
+.logseq-block-embed {
     border: 1px solid var(--background-modifier-border);
     background-color: var(--background-secondary);
     padding: 0.5em 1em;
     margin: 0.5em 0;
     border-radius: var(--radius-m);
+    box-sizing: border-box;
+}
+
+.logseq-block-embed-root > :first-child,
+.logseq-block-embed-children > :first-child {
+    margin-top: 0;
+}
+
+.logseq-block-embed-root > :last-child,
+.logseq-block-embed-children > :last-child {
+    margin-bottom: 0;
+}
+
+.logseq-block-embed-children {
+    margin-top: 0.35em;
+}
+
+.logseq-inline-block-ref {
+    display: inline;
+    padding: 0 0.25em;
+    border: 1px solid var(--background-modifier-border);
+    background-color: var(--background-secondary-alt, var(--background-secondary));
+    border-radius: 4px;
+    cursor: pointer;
+    white-space: normal;
 }
 
 /*
@@ -14,6 +39,8 @@
 */
 .logseq-block-ref-enhancer-widget::before,
 .logseq-block-ref-enhancer-widget::after,
+.logseq-inline-block-ref::before,
+.logseq-inline-block-ref::after,
 .logseq-block-embed::before,
 .logseq-block-embed::after {
     content: none !important;
@@ -28,27 +55,127 @@
 .markdown-source-view.mod-cm6 .cm-content .logseq-block-embed {
     font-family: var(--font-text);
     white-space: normal;
+    box-sizing: border-box;
+}
 
-    /* 关键修复：避免列表项中出现“单独的圆点行” */
-    /* 在编辑器行内渲染为占满行宽的内联块，移除上下外边距以防断行 */
+.markdown-source-view.mod-cm6 .cm-content .logseq-block-embed-widget {
+    box-sizing: border-box;
+}
+
+.markdown-source-view.mod-cm6 .cm-content .logseq-block-embed-widget:not(.is-inline-embed) {
+    display: block;
+    width: 100%;
+}
+
+.markdown-source-view.mod-cm6 .cm-content .logseq-block-embed-widget.is-inline-embed {
     display: inline-block;
+    vertical-align: top;
+    white-space: normal;
+}
+
+.markdown-source-view.mod-cm6 .cm-content .logseq-block-embed-widget.is-inline-embed.is-list-inline-embed {
+    width: auto;
+    max-width: 100%;
+    min-width: 0;
+    max-inline-size: var(--logseq-inline-available-width-px, 100%);
+}
+
+.markdown-source-view.mod-cm6 .cm-content .logseq-block-embed-widget.is-inline-embed.is-list-inline-embed .logseq-live-preview-embed-layout {
+    display: inline-block;
+    width: auto;
+    max-width: 100%;
+    min-width: 0;
+    max-inline-size: var(--logseq-inline-available-width-px, 100%);
+    vertical-align: top;
+}
+
+.markdown-source-view.mod-cm6 .cm-content .logseq-block-embed-widget.is-inline-embed.is-list-inline-embed .logseq-block-embed {
+    display: block;
+    width: auto;
+    max-width: 100%;
+    min-width: 0;
+    max-inline-size: var(--logseq-inline-available-width-px, 100%);
+    overflow-wrap: anywhere;
+}
+
+.markdown-source-view.mod-cm6 .cm-content .logseq-block-embed-widget .logseq-block-embed {
+    width: 100%;
+    margin: 0;
+}
+
+.markdown-source-view.mod-cm6 .cm-content .logseq-block-embed-widget.is-measured-list-embed {
+    width: 100%;
+}
+
+.markdown-source-view.mod-cm6 .cm-content .logseq-live-preview-list-embed {
+    position: relative;
+    display: block;
     width: 100%;
     box-sizing: border-box;
-    margin: 0.5em 0;        /* 与阅读模式保持一致的上下间距 */
-    vertical-align: top;    /* 与列表标记顶部对齐 */
+    padding-left: var(--logseq-list-content-offset-px, 0px);
 }
-/* Live Preview: 统一内部段落/列表的上下间距，使其贴近阅读模式 */
-.markdown-source-view.mod-cm6 .cm-content .logseq-block-embed.markdown-rendered > :first-child {
-  margin-top: 0;
+
+.markdown-source-view.mod-cm6 .cm-content .logseq-live-preview-list-marker {
+    position: absolute;
+    left: var(--logseq-list-marker-offset-px, 0px);
+    top: 0.5em;
+    width: max(calc(var(--logseq-list-content-offset-px, 0px) - var(--logseq-list-marker-offset-px, 0px)), 1.25em);
+    height: var(--logseq-line-height-px, 1.6em);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+    color: var(--text-muted);
 }
-.markdown-source-view.mod-cm6 .cm-content .logseq-block-embed.markdown-rendered > :last-child {
-  margin-bottom: 0;
+
+.markdown-source-view.mod-cm6 .cm-content .logseq-live-preview-list-marker::before {
+    content: "•";
 }
-.markdown-source-view.mod-cm6 .cm-content .logseq-block-embed.markdown-rendered p,
-.markdown-source-view.mod-cm6 .cm-content .logseq-block-embed.markdown-rendered ul,
-.markdown-source-view.mod-cm6 .cm-content .logseq-block-embed.markdown-rendered ol,
-.markdown-source-view.mod-cm6 .cm-content .logseq-block-embed.markdown-rendered pre,
-.markdown-source-view.mod-cm6 .cm-content .logseq-block-embed.markdown-rendered blockquote {
+
+.markdown-source-view.mod-cm6 .cm-content .logseq-live-preview-list-embed > .logseq-block-embed {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+    margin: 0;
+}
+
+.markdown-source-view.mod-cm6 .cm-content .logseq-live-preview-embed-layout {
+    display: block;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.markdown-source-view.mod-cm6 .cm-content .logseq-live-preview-embed-card {
+    min-width: 0;
+}
+
+.markdown-reading-view li > .logseq-block-embed,
+.markdown-preview-view li > .logseq-block-embed {
+    display: inline-block;
+    width: calc(100% - 0.5em);
+    margin: 0;
+    vertical-align: top;
+}
+
+.markdown-reading-view li > .logseq-block-embed + *,
+.markdown-preview-view li > .logseq-block-embed + * {
+    margin-top: 0.5em;
+}
+
+.markdown-source-view.mod-cm6 .cm-content .logseq-inline-block-ref {
+    font-family: var(--font-text);
+}
+
+.markdown-source-view.mod-cm6 .cm-content .logseq-block-embed p,
+.markdown-source-view.mod-cm6 .cm-content .logseq-block-embed ul,
+.markdown-source-view.mod-cm6 .cm-content .logseq-block-embed ol,
+.markdown-source-view.mod-cm6 .cm-content .logseq-block-embed pre,
+.markdown-source-view.mod-cm6 .cm-content .logseq-block-embed blockquote,
+.markdown-reading-view .logseq-block-embed p,
+.markdown-reading-view .logseq-block-embed ul,
+.markdown-reading-view .logseq-block-embed ol,
+.markdown-reading-view .logseq-block-embed pre,
+.markdown-reading-view .logseq-block-embed blockquote {
   margin-top: 0.5em;
   margin-bottom: 0.5em;
 }

@@ -6,6 +6,8 @@ export interface BlockCache {
     filePath: string;
     /** The raw text content of the block itself (the line with the dash). */
     rawContent: string;
+    /** Descendant block lines belonging to this block, excluding the root line itself. */
+    childrenMarkdown?: string;
     /** The starting line number of the block in the file (0-indexed). */
     startLine: number;
     /** An array of UUIDs of the direct children of this block. */

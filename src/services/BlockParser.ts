@@ -16,6 +16,12 @@ export class BlockParser {
     private readonly BLOCK_ID_REGEX = /^\s*id::\s*([a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12})/;
     private readonly BLOCK_PROPS_REGEX = /^\s*([^-\s].*?::\s*.*)$/;
 
+    private appendChildLine(target: BlockCache, line: string) {
+        target.childrenMarkdown = target.childrenMarkdown
+            ? `${target.childrenMarkdown}\n${line}`
+            : line;
+    }
+
     public parse(filePath: string, content: string): Map<string, BlockCache> {
         const lines = content.split('\n');
         const allFoundBlocks: BlockInProgress[] = [];
@@ -41,6 +47,7 @@ export class BlockParser {
                     block: {
                         filePath,
                         rawContent,
+                        childrenMarkdown: "",
                         startLine: i,
                         childrenIDs: [],
                     },
@@ -50,6 +57,10 @@ export class BlockParser {
 
                 while (parentStack.length > 0 && parentStack[parentStack.length - 1].indentation >= indentation) {
                     parentStack.pop();
+                }
+
+                for (const ancestor of parentStack) {
+                    this.appendChildLine(ancestor.block, line);
                 }
 
                 if (parentStack.length > 0) {
@@ -79,6 +90,9 @@ export class BlockParser {
                      const propIndentation = line.indexOf(propMatch[1]);
                      if (propIndentation > lastBlock.indentation) {
                          lastBlock.block.rawContent += '\n' + line;
+                         for (let index = 0; index < parentStack.length - 1; index++) {
+                             this.appendChildLine(parentStack[index].block, line);
+                         }
                      }
                 }
             }

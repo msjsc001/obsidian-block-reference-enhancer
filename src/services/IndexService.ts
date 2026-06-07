@@ -50,7 +50,10 @@ export class IndexService {
                 return false;
             }
             const data = await this.app.vault.adapter.read(this.CACHE_FILE_PATH);
-            const entries = JSON.parse(data) as [string, any][];
+            const entries = JSON.parse(data) as [string, BlockCache][];
+            if (entries.some(([, block]) => typeof block.childrenMarkdown !== 'string')) {
+                return false;
+            }
             this.index = new Map(entries);
             // console.log(`Index loaded from cache. Total blocks: ${this.index.size}`);
             return true;

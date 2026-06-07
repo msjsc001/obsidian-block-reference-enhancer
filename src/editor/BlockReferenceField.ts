@@ -1,14 +1,17 @@
 import { StateField, StateEffect, RangeSet, Transaction } from "@codemirror/state";
 import { Decoration, DecorationSet, EditorView } from "@codemirror/view";
-import { BlockReferenceWidget } from "./BlockReferenceWidget";
+import { BlockReferenceWidget, BlockRenderMode, BlockWidgetInteraction } from "./BlockReferenceWidget";
 
 // --- 消息定义 (StateEffects) ---
 
 // 消息1: 请求在某个位置添加一个“加载中”状态的 Widget
-export const addLoadingWidgetEffect = StateEffect.define<{ from: number, to: number, uuid: string }>();
+export const addLoadingWidgetEffect = StateEffect.define<{ from: number, to: number, uuid: string, mode: BlockRenderMode, interaction?: BlockWidgetInteraction }>();
 
 // 消息2: 请求将某个位置的 Widget 更新为“已渲染”状态，并提供 HTML 内容
-export const setRenderedWidgetEffect = StateEffect.define<{ from: number, to: number, html: string }>();
+export const setRenderedWidgetEffect = StateEffect.define<{ from: number, to: number, content: string, mode: BlockRenderMode, interaction?: BlockWidgetInteraction }>();
+
+// 消息3: 请求移除某个范围上的 Widget，恢复原始 Markdown 文本
+export const removeWidgetEffect = StateEffect.define<{ from: number, to: number, refId?: string }>();
 
 // --- 状态容器 (StateField) ---
 
@@ -26,28 +29,110 @@ export const blockReferenceField = StateField.define<DecorationSet>({
         // 然后，处理本交易中我们关心的所有消息
         for (const effect of tr.effects) {
             if (effect.is(addLoadingWidgetEffect)) {
-                const { from, to } = effect.value;
+                const { from, to, mode, interaction } = effect.value;
+                const refId = interaction?.refId ?? `${mode}:${from}:${to}`;
+                const signature = interaction?.signature;
+
+                if (mode === "embed" && interaction?.cardPos !== undefined) {
+                    const source = Decoration.replace({
+                        logseqRefId: refId,
+                        logseqRole: "source",
+                        logseqSignature: signature,
+                    }).range(from, to);
+                    const card = Decoration.widget({
+                        widget: new BlockReferenceWidget("loading", mode, undefined, {
+                            ...interaction,
+                            blockWidget: true,
+                            refId,
+                        }),
+                        block: true,
+                        side: 1,
+                        logseqRefId: refId,
+                        logseqRole: "card",
+                        logseqSignature: signature,
+                    }).range(interaction.cardPos);
+
+                    widgets = widgets.update({
+                        filter: (aFrom, aTo, value) => value.spec.logseqRefId !== refId && (aTo <= from || aFrom >= to),
+                        add: [source, card],
+                        sort: true,
+                    });
+                    continue;
+                }
+
+                const isBlockWidget = interaction?.blockWidget ?? mode === "embed";
                 // 使用 replace+widget 一体化装饰，直接以小部件替换占位文本，避免排序冲突
                 const loading = Decoration.replace({
-                    widget: new BlockReferenceWidget("loading"),
+                    widget: new BlockReferenceWidget("loading", mode, undefined, interaction ? { ...interaction, refId } : undefined),
+                    block: isBlockWidget,
+                    logseqRefId: refId,
+                    logseqRole: "single",
+                    logseqSignature: signature,
                 }).range(from, to);
 
                 widgets = widgets.update({
                     // 移除与此范围重叠的旧装饰，避免重复
-                    filter: (aFrom, aTo) => aTo <= from || aFrom >= to,
+                    filter: (aFrom, aTo, value) => value.spec.logseqRefId !== refId && (aTo <= from || aFrom >= to),
                     add: [loading],
                 });
             }
             else if (effect.is(setRenderedWidgetEffect)) {
-                const { from, to, html } = effect.value;
+                const { from, to, content, mode, interaction } = effect.value;
+                const refId = interaction?.refId ?? `${mode}:${from}:${to}`;
+                const signature = interaction?.signature;
+
+                if (mode === "embed" && interaction?.cardPos !== undefined) {
+                    const source = Decoration.replace({
+                        logseqRefId: refId,
+                        logseqRole: "source",
+                        logseqSignature: signature,
+                    }).range(from, to);
+                    const card = Decoration.widget({
+                        widget: new BlockReferenceWidget("rendered", mode, content, {
+                            ...interaction,
+                            blockWidget: true,
+                            refId,
+                        }),
+                        block: true,
+                        side: 1,
+                        logseqRefId: refId,
+                        logseqRole: "card",
+                        logseqSignature: signature,
+                    }).range(interaction.cardPos);
+
+                    widgets = widgets.update({
+                        filter: (aFrom, aTo, value) => value.spec.logseqRefId !== refId && (aTo <= from || aFrom >= to),
+                        add: [source, card],
+                        sort: true,
+                    });
+                    continue;
+                }
+
+                const isBlockWidget = interaction?.blockWidget ?? mode === "embed";
                 const rendered = Decoration.replace({
-                    widget: new BlockReferenceWidget("rendered", html),
+                    widget: new BlockReferenceWidget("rendered", mode, content, interaction ? { ...interaction, refId } : undefined),
+                    block: isBlockWidget,
+                    logseqRefId: refId,
+                    logseqRole: "single",
+                    logseqSignature: signature,
                 }).range(from, to);
 
                 // 关键：移除与此范围重叠的旧装饰，并添加新的 replace+widget
                 widgets = widgets.update({
-                    filter: (aFrom, aTo) => aTo <= from || aFrom >= to,
+                    filter: (aFrom, aTo, value) => value.spec.logseqRefId !== refId && (aTo <= from || aFrom >= to),
                     add: [rendered],
+                });
+            }
+            else if (effect.is(removeWidgetEffect)) {
+                const { from, to, refId } = effect.value;
+                widgets = widgets.update({
+                    filter: (aFrom, aTo, value) => {
+                        if (refId && value.spec.logseqRefId === refId) {
+                            return false;
+                        }
+
+                        return aTo <= from || aFrom >= to;
+                    },
                 });
             }
         }
