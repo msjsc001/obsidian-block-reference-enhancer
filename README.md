@@ -25,7 +25,7 @@
 
 - 普通块引用 `((uuid))` 不再强制独占一行，而是以更适合 Obsidian 的行内方式显示
 - 块嵌入 `{{embed ((uuid))}}` 会继续显示完整内容和子级，适合作为查看器使用
-- Reading Mode 的显示已经比较稳定
+- Reading Mode 的显示整体可用，但长页面中如果包含较多块嵌入，滚动过程中仍可能出现页面自动继续下滑的情况
 - Live Preview 已经可用，复杂列表和不同主题下仍可能有细微样式差异
 
 ## 安装与使用
@@ -102,7 +102,7 @@ npm run build
 
 - 这个插件现在更偏向“Logseq 语法查看器”，而不是完整的 Logseq 编辑体验
 - Live Preview 下，复杂列表、较长嵌入内容、不同主题样式之间，仍可能存在少量视觉差异
-- Reading Mode 通常会比 Live Preview 更稳定
+- Reading Mode 通常会比 Live Preview 更稳定，但在长页面中连续滚动、且页面内有较多 `{{embed ((uuid))}}` 时，仍可能触发自动滚动这一已知问题
 
 ## 路线图
 

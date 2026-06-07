@@ -32,9 +32,13 @@ The current release is best understood as a viewer:
 
 ## Current status
 
-- Reading Mode is generally stable
+- Reading Mode is usable overall, but long pages with many block embeds may still continue scrolling on their own while async embeds finish rendering
 - Live Preview is usable
 - Complex list layouts and some themes may still show small visual differences in Live Preview
+
+## Known issue
+
+- In Reading Mode, long notes that contain many `{{embed ((uuid))}}` blocks may still show unintended auto-scrolling during downward scrolling. This issue is documented and not considered fully resolved in the current release.
 
 ## Development
 
