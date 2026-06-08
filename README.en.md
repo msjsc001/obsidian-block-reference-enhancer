@@ -34,13 +34,9 @@ The current release is best understood as a viewer:
 
 - Live Preview editor scrolling is now stable when passing block embeds, and the slow auto-scroll issue in editing mode has been fixed
 - High-frequency console spam caused by repeated block lookups in editing mode has been fixed
-- Reading Mode is usable overall, but long pages with many block embeds may still continue scrolling on their own while async embeds finish rendering
+- Reading Mode scrolling is now stable in long notes that contain many block embeds
 - Live Preview is usable
 - Complex list layouts and some themes may still show small visual differences in Live Preview
-
-## Known issue
-
-- In Reading Mode, long notes that contain many `{{embed ((uuid))}}` blocks may still show unintended auto-scrolling during downward scrolling. This issue is documented and not considered fully resolved in the current release.
 
 ## Development
 
