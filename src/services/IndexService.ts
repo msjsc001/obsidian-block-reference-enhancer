@@ -36,11 +36,9 @@ export class IndexService {
         try {
             const data = JSON.stringify(Array.from(this.index.entries()));
             await this.app.vault.adapter.write(this.CACHE_FILE_PATH, data);
-            // console.log(`Index saved to cache. Total blocks: ${this.index.size}`);
         } catch (error) {
             console.error("Error saving index to cache:", error);
         }
-        console.log(`%c[IndexService] INITIALIZED. Index size: ${this.index.size}`, 'background: #222; color: #bada55');
     }
 
     private async loadIndexFromCache(): Promise<boolean> {
@@ -118,7 +116,6 @@ export class IndexService {
     }
     
     public getBlock(id: string): BlockCache | undefined {
-        console.log(`[IndexService] GET_BLOCK called for ID: ${id}. Current index size: ${this.index.size}`);
         return this.index.get(id);
     }
 

@@ -125,6 +125,10 @@ export class BlockReferenceWidget extends WidgetType {
         }
 
         if (this.state === "loading") {
+            const reservedHeight = Math.max(this.interaction?.reservedHeightPx ?? 0, 0);
+            if (reservedHeight > 0) {
+                card.style.minHeight = `${reservedHeight}px`;
+            }
             card.setText(this.mode === "embed" ? "Loading block..." : "Loading...");
             card.addClass("is-loading");
         } else if (this.state === "rendered" && this.content) {

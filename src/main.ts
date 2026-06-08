@@ -16,12 +16,45 @@ const MAX_INLINE_SUMMARY_LENGTH = 60;
 const STANDALONE_EMBED_REGEX = /^\s*\{\{embed\s+\(\(([A-Za-z0-9_-]{36,})\)\)\s*\}\}\s*$/;
 const MANUAL_RENDER_SCOPE_ATTR = 'data-logseq-manual-render';
 const MANAGED_NODE_ATTR = 'data-logseq-managed-node';
+const EMBED_PLACEHOLDER_LINE_HEIGHT_PX = 22;
+const EMBED_PLACEHOLDER_BASE_HEIGHT_PX = 24;
+const EMBED_PLACEHOLDER_MIN_LINES = 2;
+const EMBED_PLACEHOLDER_MAX_LINES = 10;
+const READING_MODE_SCROLL_IDLE_MS = 180;
+const SCROLL_ANCHOR_SAMPLE_OFFSETS_PX = [16, 32, 48, 72];
+
+interface DeferredEmbedRenderTask {
+	host: HTMLElement;
+	uuid: string;
+	sourcePath: string;
+	component: Component;
+	visitedEmbeds: Set<string>;
+}
+
+interface ScrollAnchorSnapshot {
+	element: HTMLElement;
+	top: number;
+}
+
+interface ReadingModeRenderQueue {
+	previewRoot: HTMLElement;
+	scrollRoot: HTMLElement;
+	tasks: DeferredEmbedRenderTask[];
+	scrollListener: () => void;
+	idleTimer: number | null;
+	isScrolling: boolean;
+	isFlushing: boolean;
+	isFlushScheduled: boolean;
+	retainCount: number;
+}
 
 function createBlockReferenceRegex() {
 	return /\{\{embed\s+\(\(([A-Za-z0-9_-]{36,})\)\)\s*\}\}|\(\(([A-Za-z0-9_-]{36,})\)\)|（（([A-Za-z0-9_-]{36,})））/g;
 }
 
 class ReferencePostProcessChild extends MarkdownRenderChild {
+	private readingModeQueueRoot: HTMLElement | null = null;
+
 	constructor(
 		containerEl: HTMLElement,
 		private readonly plugin: LogseqBlockRefEnhancer,
@@ -31,13 +64,19 @@ class ReferencePostProcessChild extends MarkdownRenderChild {
 	}
 
 	async onload() {
+		this.readingModeQueueRoot = this.plugin.attachReadingModeRenderQueue(this.containerEl);
 		await this.plugin.processRenderedReferences(this.containerEl, this.sourcePath, this, new Set<string>());
+	}
+
+	onunload() {
+		this.plugin.detachReadingModeRenderQueue(this.readingModeQueueRoot);
 	}
 }
 
 export default class LogseqBlockRefEnhancer extends Plugin {
 	settings: LogseqBlockRefEnhancerSettings;
 	indexService: IndexService;
+	private readonly readingModeRenderQueues = new Map<HTMLElement, ReadingModeRenderQueue>();
 
 	async onload() {
 		await this.loadSettings();
@@ -196,6 +235,310 @@ export default class LogseqBlockRefEnhancer extends Plugin {
 		return host.innerHTML;
 	}
 
+	attachReadingModeRenderQueue(element: HTMLElement): HTMLElement | null {
+		const previewRoot = this.resolveReadingModePreviewRoot(element);
+		if (!previewRoot) {
+			return null;
+		}
+
+		const existingQueue = this.readingModeRenderQueues.get(previewRoot);
+		if (existingQueue) {
+			existingQueue.retainCount += 1;
+			return previewRoot;
+		}
+
+		const scrollRoot = this.findReadingModeScrollRoot(previewRoot);
+		const queue: ReadingModeRenderQueue = {
+			previewRoot,
+			scrollRoot,
+			tasks: [],
+			scrollListener: () => {
+				const activeQueue = this.readingModeRenderQueues.get(previewRoot);
+				if (!activeQueue) {
+					return;
+				}
+
+				activeQueue.isScrolling = true;
+				if (activeQueue.idleTimer !== null) {
+					window.clearTimeout(activeQueue.idleTimer);
+				}
+
+				activeQueue.idleTimer = window.setTimeout(() => {
+					const latestQueue = this.readingModeRenderQueues.get(previewRoot);
+					if (!latestQueue) {
+						return;
+					}
+
+					latestQueue.idleTimer = null;
+					latestQueue.isScrolling = false;
+					this.scheduleReadingModeRenderQueueFlush(previewRoot);
+				}, READING_MODE_SCROLL_IDLE_MS);
+			},
+			idleTimer: null,
+			isScrolling: false,
+			isFlushing: false,
+			isFlushScheduled: false,
+			retainCount: 1,
+		};
+
+		scrollRoot.addEventListener('scroll', queue.scrollListener, { passive: true });
+		this.readingModeRenderQueues.set(previewRoot, queue);
+		return previewRoot;
+	}
+
+	detachReadingModeRenderQueue(previewRoot: HTMLElement | null) {
+		if (!previewRoot) {
+			return;
+		}
+
+		const queue = this.readingModeRenderQueues.get(previewRoot);
+		if (!queue) {
+			return;
+		}
+
+		queue.retainCount -= 1;
+		if (queue.retainCount > 0) {
+			return;
+		}
+
+		if (queue.idleTimer !== null) {
+			window.clearTimeout(queue.idleTimer);
+		}
+
+		queue.scrollRoot.removeEventListener('scroll', queue.scrollListener);
+		queue.tasks.length = 0;
+		this.readingModeRenderQueues.delete(previewRoot);
+	}
+
+	private resolveReadingModePreviewRoot(element: HTMLElement): HTMLElement | null {
+		const previewRoot = element.closest('.markdown-reading-view, .markdown-preview-view');
+		if (previewRoot instanceof HTMLElement) {
+			return previewRoot;
+		}
+
+		const renderedRoot = element.closest('.markdown-rendered');
+		return renderedRoot instanceof HTMLElement ? renderedRoot : null;
+	}
+
+	private findReadingModeScrollRoot(previewRoot: HTMLElement): HTMLElement {
+		let current: HTMLElement | null = previewRoot;
+
+		while (current) {
+			const style = window.getComputedStyle(current);
+			const isScrollable = /(auto|scroll)/.test(style.overflowY) && current.scrollHeight > current.clientHeight;
+			if (isScrollable) {
+				return current;
+			}
+
+			current = current.parentElement;
+		}
+
+		return previewRoot;
+	}
+
+	private enqueueReadingModeEmbedRender(previewRoot: HTMLElement, task: DeferredEmbedRenderTask) {
+		const queue = this.readingModeRenderQueues.get(previewRoot);
+		if (!queue) {
+			void this.populateEmbedContainer(task.host, task.uuid, task.sourcePath, task.component, task.visitedEmbeds);
+			return;
+		}
+
+		queue.tasks.push(task);
+		this.scheduleReadingModeRenderQueueFlush(previewRoot);
+	}
+
+	private scheduleReadingModeRenderQueueFlush(previewRoot: HTMLElement) {
+		const queue = this.readingModeRenderQueues.get(previewRoot);
+		if (!queue || queue.isFlushing || queue.isFlushScheduled || queue.isScrolling) {
+			return;
+		}
+
+		queue.isFlushScheduled = true;
+		window.setTimeout(() => {
+			const latestQueue = this.readingModeRenderQueues.get(previewRoot);
+			if (!latestQueue) {
+				return;
+			}
+
+			latestQueue.isFlushScheduled = false;
+			void this.flushReadingModeRenderQueue(previewRoot);
+		}, 0);
+	}
+
+	private async flushReadingModeRenderQueue(previewRoot: HTMLElement) {
+		const queue = this.readingModeRenderQueues.get(previewRoot);
+		if (!queue || queue.isFlushing || queue.isScrolling) {
+			return;
+		}
+
+		queue.isFlushing = true;
+
+		try {
+			while (queue.tasks.length > 0) {
+				if (queue.isScrolling) {
+					break;
+				}
+
+				const task = queue.tasks.shift();
+				if (!task || !task.host.isConnected) {
+					continue;
+				}
+
+				const scrollAnchor = this.captureScrollAnchor(queue.previewRoot, queue.scrollRoot, task.host);
+				await this.populateEmbedContainer(task.host, task.uuid, task.sourcePath, task.component, task.visitedEmbeds);
+				this.restoreScrollAnchor(queue.scrollRoot, scrollAnchor);
+				await this.waitForNextAnimationFrame();
+				this.restoreScrollAnchor(queue.scrollRoot, scrollAnchor);
+			}
+		} finally {
+			queue.isFlushing = false;
+
+			if (queue.tasks.length > 0 && !queue.isScrolling) {
+				this.scheduleReadingModeRenderQueueFlush(previewRoot);
+			}
+		}
+	}
+
+	private captureScrollAnchor(
+		previewRoot: HTMLElement,
+		scrollRoot: HTMLElement,
+		excludedHost: HTMLElement
+	): ScrollAnchorSnapshot | null {
+		if (!previewRoot.isConnected || !scrollRoot.isConnected) {
+			return null;
+		}
+
+		const scrollRect = scrollRoot.getBoundingClientRect();
+		if (scrollRect.height <= 1 || scrollRect.width <= 1) {
+			return null;
+		}
+
+		const x = Math.min(scrollRect.right - 12, Math.max(scrollRect.left + 12, scrollRect.left + 48));
+		for (const offset of SCROLL_ANCHOR_SAMPLE_OFFSETS_PX) {
+			const y = Math.min(scrollRect.bottom - 1, scrollRect.top + offset);
+			if (y <= scrollRect.top) {
+				continue;
+			}
+
+			const hitElement = document.elementFromPoint(x, y);
+			if (!(hitElement instanceof HTMLElement)) {
+				continue;
+			}
+
+			const anchor = this.normalizeScrollAnchor(previewRoot, hitElement, excludedHost);
+			if (anchor) {
+				return {
+					element: anchor,
+					top: anchor.getBoundingClientRect().top,
+				};
+			}
+		}
+
+		return this.findVisibleScrollAnchorFallback(previewRoot, scrollRoot, excludedHost);
+	}
+
+	private findVisibleScrollAnchorFallback(
+		previewRoot: HTMLElement,
+		scrollRoot: HTMLElement,
+		excludedHost: HTMLElement
+	): ScrollAnchorSnapshot | null {
+		const scrollRect = scrollRoot.getBoundingClientRect();
+		const walker = document.createTreeWalker(previewRoot, NodeFilter.SHOW_ELEMENT);
+
+		while (walker.nextNode()) {
+			const candidate = walker.currentNode;
+			if (!(candidate instanceof HTMLElement)) {
+				continue;
+			}
+
+			if (candidate === excludedHost || excludedHost.contains(candidate)) {
+				continue;
+			}
+
+			const managedAncestor = candidate.closest(`[${MANAGED_NODE_ATTR}="true"]`);
+			if (managedAncestor instanceof HTMLElement) {
+				continue;
+			}
+
+			const rect = candidate.getBoundingClientRect();
+			if (rect.height <= 0 || rect.width <= 0) {
+				continue;
+			}
+
+			if (rect.bottom < scrollRect.top || rect.top > scrollRect.bottom) {
+				continue;
+			}
+
+			return {
+				element: candidate,
+				top: rect.top,
+			};
+		}
+
+		return null;
+	}
+
+	private normalizeScrollAnchor(
+		previewRoot: HTMLElement,
+		element: HTMLElement,
+		excludedHost: HTMLElement
+	): HTMLElement | null {
+		let current: HTMLElement | null = element;
+
+		while (current) {
+			if (current === excludedHost || excludedHost.contains(current)) {
+				return null;
+			}
+
+			if (current === previewRoot) {
+				break;
+			}
+
+			if (previewRoot.contains(current)) {
+				const managedAncestor: Element | null = current.closest(`[${MANAGED_NODE_ATTR}="true"]`);
+				if (managedAncestor instanceof HTMLElement && managedAncestor !== excludedHost) {
+					current = managedAncestor.parentElement;
+					continue;
+				}
+
+				const rect = current.getBoundingClientRect();
+				if (rect.height > 0 && rect.width > 0) {
+					return current;
+				}
+			}
+
+			current = current.parentElement;
+		}
+
+		const fallback = previewRoot.firstElementChild;
+		return fallback instanceof HTMLElement ? fallback : null;
+	}
+
+	private restoreScrollAnchor(scrollRoot: HTMLElement, snapshot: ScrollAnchorSnapshot | null) {
+		if (!snapshot || !snapshot.element.isConnected || !scrollRoot.isConnected) {
+			return;
+		}
+
+		const currentTop = snapshot.element.getBoundingClientRect().top;
+		const delta = currentTop - snapshot.top;
+		if (Math.abs(delta) < 0.5) {
+			return;
+		}
+
+		scrollRoot.scrollTop += delta;
+	}
+
+	private waitForNextAnimationFrame(): Promise<void> {
+		return new Promise((resolve) => {
+			if (typeof window.requestAnimationFrame === 'function') {
+				window.requestAnimationFrame(() => resolve());
+				return;
+			}
+
+			window.setTimeout(resolve, 16);
+		});
+	}
+
 	private markManualRenderScope(element: HTMLElement) {
 		element.setAttribute(MANUAL_RENDER_SCOPE_ATTR, 'true');
 	}
@@ -206,6 +549,54 @@ export default class LogseqBlockRefEnhancer extends Plugin {
 		inlineRef.setAttribute(MANAGED_NODE_ATTR, 'true');
 		inlineRef.setText(summary);
 		return inlineRef;
+	}
+
+	private estimateEmbedPlaceholderHeight(uuid: string): number | null {
+		const block = this.indexService.getBlock(uuid);
+		if (!block) {
+			return null;
+		}
+
+		const combinedContent = [block.rawContent, block.childrenMarkdown]
+			.filter((value) => value && value.trim().length > 0)
+			.join('\n');
+
+		if (!combinedContent) {
+			return EMBED_PLACEHOLDER_BASE_HEIGHT_PX + (EMBED_PLACEHOLDER_MIN_LINES * EMBED_PLACEHOLDER_LINE_HEIGHT_PX);
+		}
+
+		const lineCount = combinedContent.split(/\r?\n/).length;
+		const estimatedLines = Math.max(
+			EMBED_PLACEHOLDER_MIN_LINES,
+			Math.min(lineCount + 1, EMBED_PLACEHOLDER_MAX_LINES)
+		);
+
+		return EMBED_PLACEHOLDER_BASE_HEIGHT_PX + (estimatedLines * EMBED_PLACEHOLDER_LINE_HEIGHT_PX);
+	}
+
+	private prepareEmbedContainer(container: HTMLElement, uuid: string) {
+		container.empty();
+		container.removeClass('logseq-block-ref-enhancer-error');
+		container.addClass('logseq-block-embed', 'is-loading');
+		container.setAttribute(MANAGED_NODE_ATTR, 'true');
+		this.markManualRenderScope(container);
+
+		const placeholderHeight = this.estimateEmbedPlaceholderHeight(uuid);
+		if (placeholderHeight !== null) {
+			container.style.setProperty('--logseq-embed-placeholder-height', `${placeholderHeight}px`);
+		} else {
+			container.style.removeProperty('--logseq-embed-placeholder-height');
+		}
+
+		const placeholder = document.createElement('div');
+		placeholder.addClass('logseq-block-embed-placeholder');
+		container.appendChild(placeholder);
+	}
+
+	private finalizeEmbedContainer(container: HTMLElement, contentNodes: Node[]) {
+		container.replaceChildren(...contentNodes);
+		container.removeClass('is-loading');
+		container.style.removeProperty('--logseq-embed-placeholder-height');
 	}
 
 	private shouldSkipTextNode(node: Text, root: HTMLElement): boolean {
@@ -245,11 +636,11 @@ export default class LogseqBlockRefEnhancer extends Plugin {
 		component: Component,
 		visitedEmbeds: Set<string>
 	) {
-		container.empty();
-		container.addClass('logseq-block-embed');
-		this.markManualRenderScope(container);
+		this.prepareEmbedContainer(container, uuid);
 
 		if (visitedEmbeds.has(uuid)) {
+			container.empty();
+			container.removeClass('is-loading');
 			container.addClass('logseq-block-ref-enhancer-error');
 			container.setText('Cyclic embed');
 			return;
@@ -257,6 +648,8 @@ export default class LogseqBlockRefEnhancer extends Plugin {
 
 		const block = this.indexService.getBlock(uuid);
 		if (!block) {
+			container.empty();
+			container.removeClass('is-loading');
 			container.addClass('logseq-block-ref-enhancer-error');
 			container.setText('Missing block');
 			return;
@@ -267,16 +660,19 @@ export default class LogseqBlockRefEnhancer extends Plugin {
 
 		const rootContainer = document.createElement('div');
 		rootContainer.addClass('logseq-block-embed-root');
-		container.appendChild(rootContainer);
 		await this.renderMarkdownAndProcess(rootContainer, block.rawContent, sourcePath, component, nextVisitedEmbeds);
+
+		const contentNodes: Node[] = [rootContainer];
 
 		const childMarkdown = block.childrenMarkdown?.trim();
 		if (childMarkdown) {
 			const childrenContainer = document.createElement('div');
 			childrenContainer.addClass('logseq-block-embed-children');
-			container.appendChild(childrenContainer);
 			await this.renderMarkdownAndProcess(childrenContainer, childMarkdown, sourcePath, component, nextVisitedEmbeds);
+			contentNodes.push(childrenContainer);
 		}
+
+		this.finalizeEmbedContainer(container, contentNodes);
 	}
 
 	async processRenderedReferences(
@@ -285,9 +681,11 @@ export default class LogseqBlockRefEnhancer extends Plugin {
 		component: Component,
 		visitedEmbeds: Set<string>
 	) {
+		const previewRoot = element.isConnected ? this.resolveReadingModePreviewRoot(element) : null;
 		const probeRegex = createBlockReferenceRegex();
 		const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
 		const nodesToProcess: Text[] = [];
+		const deferredEmbedTasks: DeferredEmbedRenderTask[] = [];
 
 		while (walker.nextNode()) {
 			const node = walker.currentNode as Text;
@@ -318,7 +716,18 @@ export default class LogseqBlockRefEnhancer extends Plugin {
 					node.parentNode?.replaceChild(embedHost, node);
 				}
 
-				await this.populateEmbedContainer(embedHost, standaloneEmbedMatch[1], sourcePath, component, visitedEmbeds);
+				if (previewRoot && embedHost.isConnected) {
+					this.prepareEmbedContainer(embedHost, standaloneEmbedMatch[1]);
+					deferredEmbedTasks.push({
+						host: embedHost,
+						uuid: standaloneEmbedMatch[1],
+						sourcePath,
+						component,
+						visitedEmbeds: new Set(visitedEmbeds),
+					});
+				} else {
+					await this.populateEmbedContainer(embedHost, standaloneEmbedMatch[1], sourcePath, component, visitedEmbeds);
+				}
 				continue;
 			}
 
@@ -353,6 +762,12 @@ export default class LogseqBlockRefEnhancer extends Plugin {
 
 			fragment.appendChild(document.createTextNode(text.slice(lastIndex)));
 			node.parentNode?.replaceChild(fragment, node);
+		}
+
+		if (previewRoot) {
+			for (const task of deferredEmbedTasks) {
+				this.enqueueReadingModeEmbedRender(previewRoot, task);
+			}
 		}
 	}
 

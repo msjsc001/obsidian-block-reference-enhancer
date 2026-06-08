@@ -5,6 +5,15 @@
     margin: 0.5em 0;
     border-radius: var(--radius-m);
     box-sizing: border-box;
+    overflow-anchor: none;
+}
+
+.logseq-block-embed.is-loading {
+    min-height: var(--logseq-embed-placeholder-height, 72px);
+}
+
+.logseq-block-embed-placeholder {
+    min-height: inherit;
 }
 
 .logseq-block-embed-root > :first-child,

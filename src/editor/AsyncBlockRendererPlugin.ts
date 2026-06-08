@@ -70,13 +70,36 @@ const EMBED_BLOCK_REF_REGEX = /\{\{embed\s+\(\(([A-Za-z0-9_-]{36,})\)\)\s*\}\}/y
 const INLINE_BLOCK_REF_REGEX = /\(\(([A-Za-z0-9_-]{36,})\)\)/y;
 const FULLWIDTH_INLINE_BLOCK_REF_REGEX = /（（([A-Za-z0-9_-]{36,})））/y;
 const FENCE_REGEX = /^\s{0,3}(`{3,}|~{3,})/;
+const LIVE_PREVIEW_SCAN_DEBOUNCE_MS = 200;
+const EMBED_PLACEHOLDER_LINE_HEIGHT_PX = 22;
+const EMBED_PLACEHOLDER_BASE_HEIGHT_PX = 24;
+const EMBED_PLACEHOLDER_MIN_LINES = 2;
+const EMBED_PLACEHOLDER_MAX_LINES = 10;
+
+function hashString(value: string): string {
+    let hash = 2166136261;
+    for (let index = 0; index < value.length; index++) {
+        hash ^= value.charCodeAt(index);
+        hash = Math.imul(hash, 16777619);
+    }
+
+    return (hash >>> 0).toString(16);
+}
+
+function normalizeMeasuredPx(value?: number): number {
+    if (value === undefined || !Number.isFinite(value)) {
+        return -1;
+    }
+
+    return Math.round(value / 4) * 4;
+}
 
 function buildTargetSignature(target: BlockRenderTarget): string {
-    return `${target.from}:${target.to}:${target.mode}:${target.uuid}:${target.blockWidget ? 1 : 0}:${target.preserveListMarker ? 1 : 0}:${target.availableInlineWidthPx ?? -1}:${target.renderAsListItem ? 1 : 0}:${target.indentColumns ?? 0}:${target.listMarkerOffsetPx ?? -1}:${target.listContentOffsetPx ?? -1}:${target.revealPos ?? -1}:${target.revealFrom ?? -1}:${target.revealTo ?? -1}:${target.cardPos ?? -1}:${target.refId ?? ""}:${target.lineHeightPx ?? -1}:${target.reservedHeightPx ?? -1}`;
+    return `${target.from}:${target.to}:${target.mode}:${target.uuid}:${target.blockWidget ? 1 : 0}:${target.preserveListMarker ? 1 : 0}:${normalizeMeasuredPx(target.availableInlineWidthPx)}:${target.renderAsListItem ? 1 : 0}:${target.indentColumns ?? 0}:${normalizeMeasuredPx(target.listMarkerOffsetPx)}:${normalizeMeasuredPx(target.listContentOffsetPx)}:${target.revealPos ?? -1}:${target.revealFrom ?? -1}:${target.revealTo ?? -1}:${target.cardPos ?? -1}:${target.refId ?? ""}:${normalizeMeasuredPx(target.lineHeightPx)}`;
 }
 
 function buildRenderSignature(target: BlockRenderTarget): string {
-    return `${target.from}:${target.to}:${target.mode}:${target.uuid}:${target.preserveListMarker ? 1 : 0}:${target.availableInlineWidthPx ?? -1}:${target.renderAsListItem ? 1 : 0}:${target.refId ?? ""}:${target.listMarkerOffsetPx ?? -1}:${target.listContentOffsetPx ?? -1}:${target.lineHeightPx ?? -1}`;
+    return `${target.from}:${target.to}:${target.mode}:${target.uuid}:${target.preserveListMarker ? 1 : 0}:${normalizeMeasuredPx(target.availableInlineWidthPx)}:${target.renderAsListItem ? 1 : 0}:${target.refId ?? ""}:${normalizeMeasuredPx(target.listMarkerOffsetPx)}:${normalizeMeasuredPx(target.listContentOffsetPx)}:${normalizeMeasuredPx(target.lineHeightPx)}`;
 }
 
 function getTargetRefId(target: BlockRenderTarget): string {
@@ -251,21 +274,22 @@ export function createAsyncBlockRendererPlugin(plugin: LogseqBlockRefEnhancer) {
         class {
             private component: Component;
             private runningRenders: Map<number, RunningRenderTask> = new Map();
-            private debouncedScan: () => void;
             private revealedEmbedPos: number | null = null;
             private inlineEmbedWidthCache: Map<string, InlineEmbedWidthGeometry> = new Map();
             private listEmbedLayoutCache: Map<string, ListEmbedLayout> = new Map();
             private overlayRoot: HTMLElement;
             private listEmbedOverlayStates: Map<string, ListEmbedOverlayState> = new Map();
             private listEmbedOverlayEntries: Map<string, ListEmbedOverlayEntry> = new Map();
+            private embedHeightCache: Map<string, number> = new Map();
+            private scanDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+            private lastScanFingerprint = "";
 
             constructor(private view: EditorView) {
                 this.component = new Component();
                 plugin.addChild(this.component);
                 this.overlayRoot = this.createOverlayRoot();
 
-                this.debouncedScan = this.debounce(this.scanAndRender.bind(this), 200);
-                this.debouncedScan();
+                this.scheduleScan();
             }
 
             update(update: ViewUpdate) {
@@ -277,8 +301,8 @@ export function createAsyncBlockRendererPlugin(plugin: LogseqBlockRefEnhancer) {
                     this.revealedEmbedPos = null;
                 }
 
-                if (update.docChanged || update.viewportChanged || update.selectionSet || update.focusChanged) {
-                    this.debouncedScan();
+                if (update.docChanged || update.selectionSet || update.focusChanged || update.geometryChanged) {
+                    this.scheduleScan();
                 }
             }
 
@@ -287,8 +311,12 @@ export function createAsyncBlockRendererPlugin(plugin: LogseqBlockRefEnhancer) {
                 this.listEmbedOverlayEntries.clear();
                 this.inlineEmbedWidthCache.clear();
                 this.listEmbedLayoutCache.clear();
+                this.embedHeightCache.clear();
                 this.overlayRoot.remove();
                 this.view.scrollDOM.classList.remove("logseq-overlay-host");
+                if (this.scanDebounceTimer) {
+                    clearTimeout(this.scanDebounceTimer);
+                }
                 this.component.unload();
                 this.runningRenders.forEach(({ controller }) => controller.abort());
             }
@@ -301,16 +329,56 @@ export function createAsyncBlockRendererPlugin(plugin: LogseqBlockRefEnhancer) {
                 return root;
             }
 
-            debounce(func: () => void, delay: number) {
-                let timeout: NodeJS.Timeout;
-                return () => {
-                    clearTimeout(timeout);
-                    timeout = setTimeout(func, delay);
-                };
+            private scheduleScan() {
+                if (this.scanDebounceTimer) {
+                    clearTimeout(this.scanDebounceTimer);
+                }
+
+                this.scanDebounceTimer = setTimeout(() => {
+                    this.scanDebounceTimer = null;
+                    this.scanAndRender();
+                }, LIVE_PREVIEW_SCAN_DEBOUNCE_MS);
             }
 
             private selectionOverlapsRange(from: number, to: number): boolean {
                 return this.view.state.selection.ranges.some((range) => range.from <= to && range.to >= from);
+            }
+
+            private estimateEmbedPlaceholderHeight(uuid: string): number {
+                const block = plugin.indexService.getBlock(uuid);
+                if (!block) {
+                    return EMBED_PLACEHOLDER_BASE_HEIGHT_PX + (EMBED_PLACEHOLDER_MIN_LINES * EMBED_PLACEHOLDER_LINE_HEIGHT_PX);
+                }
+
+                const combinedContent = [block.rawContent, block.childrenMarkdown]
+                    .filter((value) => value && value.trim().length > 0)
+                    .join("\n");
+
+                if (!combinedContent) {
+                    return EMBED_PLACEHOLDER_BASE_HEIGHT_PX + (EMBED_PLACEHOLDER_MIN_LINES * EMBED_PLACEHOLDER_LINE_HEIGHT_PX);
+                }
+
+                const lineCount = combinedContent.split(/\r?\n/).length;
+                const estimatedLines = Math.max(
+                    EMBED_PLACEHOLDER_MIN_LINES,
+                    Math.min(lineCount + 1, EMBED_PLACEHOLDER_MAX_LINES),
+                );
+
+                return EMBED_PLACEHOLDER_BASE_HEIGHT_PX + (estimatedLines * EMBED_PLACEHOLDER_LINE_HEIGHT_PX);
+            }
+
+            private getReservedHeightPx(target: BlockRenderTarget): number {
+                if (target.mode !== "embed") {
+                    return 0;
+                }
+
+                const refId = getTargetRefId(target);
+                const cachedHeight = this.embedHeightCache.get(refId);
+                if (cachedHeight && cachedHeight > 0) {
+                    return cachedHeight;
+                }
+
+                return this.estimateEmbedPlaceholderHeight(target.uuid);
             }
 
             private measureListEmbedLayout(target: BlockRenderTarget): ListEmbedLayout | null {
@@ -356,6 +424,8 @@ export function createAsyncBlockRendererPlugin(plugin: LogseqBlockRefEnhancer) {
             }
 
             private measureRenderTarget(target: BlockRenderTarget): BlockRenderTarget {
+                const reservedHeightPx = this.getReservedHeightPx(target);
+
                 if (target.preserveListMarker) {
                     const refId = getTargetRefId(target);
                     const measuredWidth = this.measureInlineEmbedWidth(target);
@@ -371,11 +441,15 @@ export function createAsyncBlockRendererPlugin(plugin: LogseqBlockRefEnhancer) {
                     return {
                         ...target,
                         availableInlineWidthPx: inlineWidth.availableWidthPx,
+                        reservedHeightPx,
                     };
                 }
 
                 if (!target.renderAsListItem) {
-                    return target;
+                    return {
+                        ...target,
+                        reservedHeightPx,
+                    };
                 }
 
                 const refId = getTargetRefId(target);
@@ -388,7 +462,7 @@ export function createAsyncBlockRendererPlugin(plugin: LogseqBlockRefEnhancer) {
                 if (!layout) {
                     return {
                         ...target,
-                        reservedHeightPx: this.listEmbedOverlayStates.get(refId)?.reservedHeightPx ?? 0,
+                        reservedHeightPx,
                     };
                 }
 
@@ -397,8 +471,46 @@ export function createAsyncBlockRendererPlugin(plugin: LogseqBlockRefEnhancer) {
                     listMarkerOffsetPx: layout.markerOffsetPx,
                     listContentOffsetPx: layout.contentOffsetPx,
                     lineHeightPx: layout.lineHeight,
-                    reservedHeightPx: this.listEmbedOverlayStates.get(refId)?.reservedHeightPx ?? 0,
+                    reservedHeightPx,
                 };
+            }
+
+            private createEmbedInteraction(target: BlockRenderTarget, widgetSignature: string) {
+                return {
+                    from: target.from,
+                    to: target.to,
+                    revealPos: target.revealPos ?? target.from,
+                    blockWidget: target.blockWidget,
+                    preserveListMarker: target.preserveListMarker,
+                    availableInlineWidthPx: target.availableInlineWidthPx,
+                    listPrefixColumns: target.renderAsListItem ? target.indentColumns : undefined,
+                    listMarkerOffsetPx: target.listMarkerOffsetPx,
+                    listContentOffsetPx: target.listContentOffsetPx,
+                    cardPos: target.cardPos,
+                    refId: getTargetRefId(target),
+                    signature: widgetSignature,
+                    lineHeightPx: target.lineHeightPx,
+                    reservedHeightPx: target.reservedHeightPx,
+                };
+            }
+
+            private captureRenderedEmbedHeight(refId: string) {
+                this.view.requestMeasure({
+                    read: () => {
+                        const widget = this.view.scrollDOM.querySelector(`.logseq-block-embed-widget[data-logseq-ref-id="${CSS.escape(refId)}"]`);
+                        if (!(widget instanceof HTMLElement)) {
+                            return null;
+                        }
+
+                        const height = Math.ceil(widget.getBoundingClientRect().height);
+                        return height > 0 ? height : null;
+                    },
+                    write: (height) => {
+                        if (typeof height === "number" && height > 0) {
+                            this.embedHeightCache.set(refId, height);
+                        }
+                    },
+                });
             }
 
             private buildListEmbedCard(target: BlockRenderTarget, html: string): HTMLElement {
@@ -567,7 +679,25 @@ export function createAsyncBlockRendererPlugin(plugin: LogseqBlockRefEnhancer) {
             scanAndRender() {
                 const currentWidgets = this.view.state.field(blockReferenceField);
                 const doc = this.view.state.doc;
-                const rawTargets = collectRenderTargets(doc.sliceString(0, doc.length));
+                const docText = doc.sliceString(0, doc.length);
+                const selectionFingerprint = this.view.state.selection.ranges
+                    .map((range) => `${range.from}:${range.to}`)
+                    .join("|");
+                const contentWidth = Math.round(this.view.contentDOM.getBoundingClientRect().width);
+                const scanFingerprint = [
+                    hashString(docText),
+                    selectionFingerprint,
+                    this.revealedEmbedPos ?? -1,
+                    this.view.hasFocus ? 1 : 0,
+                    contentWidth,
+                ].join(":");
+
+                if (scanFingerprint === this.lastScanFingerprint) {
+                    return;
+                }
+
+                this.lastScanFingerprint = scanFingerprint;
+                const rawTargets = collectRenderTargets(docText);
                 this.syncRevealedEmbedTarget(rawTargets);
                 const targets = rawTargets.map((target) => this.measureRenderTarget(target));
                 const activeTargets = new Map<number, BlockRenderTarget>();
@@ -639,22 +769,7 @@ export function createAsyncBlockRendererPlugin(plugin: LogseqBlockRefEnhancer) {
                             uuid: target.uuid,
                             mode: target.mode,
                             interaction: target.mode === "embed"
-                                ? {
-                                    from: target.from,
-                                    to: target.to,
-                                    revealPos: target.revealPos ?? target.from,
-                                    blockWidget: target.blockWidget,
-                                    preserveListMarker: target.preserveListMarker,
-                                    availableInlineWidthPx: target.availableInlineWidthPx,
-                                    listPrefixColumns: target.renderAsListItem ? target.indentColumns : undefined,
-                                    listMarkerOffsetPx: target.listMarkerOffsetPx,
-                                    listContentOffsetPx: target.listContentOffsetPx,
-                                    cardPos: target.cardPos,
-                                    refId: getTargetRefId(target),
-                                    signature: widgetSignature,
-                                    lineHeightPx: target.lineHeightPx,
-                                    reservedHeightPx: target.reservedHeightPx,
-                                }
+                                ? this.createEmbedInteraction(target, widgetSignature)
                                 : undefined,
                         }),
                     });
@@ -685,30 +800,17 @@ export function createAsyncBlockRendererPlugin(plugin: LogseqBlockRefEnhancer) {
                         return;
                     }
 
+                    const refId = getTargetRefId(target);
                     this.view.dispatch({
                         effects: setRenderedWidgetEffect.of({
                             from: target.from,
                             to: target.to,
                             content: html,
                             mode: "embed",
-                            interaction: {
-                                from: target.from,
-                                to: target.to,
-                                revealPos: target.revealPos ?? target.from,
-                                blockWidget: target.blockWidget,
-                                preserveListMarker: target.preserveListMarker,
-                                availableInlineWidthPx: target.availableInlineWidthPx,
-                                listPrefixColumns: target.renderAsListItem ? target.indentColumns : undefined,
-                                listMarkerOffsetPx: target.listMarkerOffsetPx,
-                                listContentOffsetPx: target.listContentOffsetPx,
-                                cardPos: target.cardPos,
-                                refId: getTargetRefId(target),
-                                signature: widgetSignature,
-                                lineHeightPx: target.lineHeightPx,
-                                reservedHeightPx: target.reservedHeightPx,
-                            },
+                            interaction: this.createEmbedInteraction(target, widgetSignature),
                         }),
                     });
+                    this.captureRenderedEmbedHeight(refId);
                 } catch (error) {
                     console.error("Logseq Block Ref Enhancer Error:", error);
                 } finally {

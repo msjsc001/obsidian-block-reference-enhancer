@@ -1,6 +1,6 @@
 {
     "name": "logseq-block-ref-enhancer",
-    "version": "1.0.1",
+    "version": "1.0.2",
     "description": "View Logseq-style block references and block embeds inside Obsidian.",
     "main": "main.js",
     "scripts": {

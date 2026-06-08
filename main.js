@@ -146,7 +146,6 @@ var IndexService = class {
     } catch (error) {
       console.error("Error saving index to cache:", error);
     }
-    console.log(`%c[IndexService] INITIALIZED. Index size: ${this.index.size}`, "background: #222; color: #bada55");
   }
   async loadIndexFromCache() {
     try {
@@ -204,7 +203,6 @@ var IndexService = class {
     this.debouncedSave();
   }
   getBlock(id) {
-    console.log(`[IndexService] GET_BLOCK called for ID: ${id}. Current index size: ${this.index.size}`);
     return this.index.get(id);
   }
   searchBlocks(query) {
@@ -302,7 +300,7 @@ var BlockReferenceWidget = class extends import_view.WidgetType {
     return event.type !== "mousedown";
   }
   createEmbedCard(isBlockWidget, isListCard) {
-    var _a, _b, _c;
+    var _a, _b, _c, _d, _e;
     const card = document.createElement("div");
     const usesMeasuredListLayout = ((_a = this.interaction) == null ? void 0 : _a.listMarkerOffsetPx) !== void 0 && ((_b = this.interaction) == null ? void 0 : _b.listContentOffsetPx) !== void 0;
     const preservesListMarker = ((_c = this.interaction) == null ? void 0 : _c.preserveListMarker) === true;
@@ -352,6 +350,10 @@ var BlockReferenceWidget = class extends import_view.WidgetType {
       return card;
     }
     if (this.state === "loading") {
+      const reservedHeight = Math.max((_e = (_d = this.interaction) == null ? void 0 : _d.reservedHeightPx) != null ? _e : 0, 0);
+      if (reservedHeight > 0) {
+        card.style.minHeight = `${reservedHeight}px`;
+      }
       card.setText(this.mode === "embed" ? "Loading block..." : "Loading...");
       card.addClass("is-loading");
     } else if (this.state === "rendered" && this.content) {
@@ -523,13 +525,32 @@ var EMBED_BLOCK_REF_REGEX = /\{\{embed\s+\(\(([A-Za-z0-9_-]{36,})\)\)\s*\}\}/y;
 var INLINE_BLOCK_REF_REGEX = /\(\(([A-Za-z0-9_-]{36,})\)\)/y;
 var FULLWIDTH_INLINE_BLOCK_REF_REGEX = /（（([A-Za-z0-9_-]{36,})））/y;
 var FENCE_REGEX = /^\s{0,3}(`{3,}|~{3,})/;
+var LIVE_PREVIEW_SCAN_DEBOUNCE_MS = 200;
+var EMBED_PLACEHOLDER_LINE_HEIGHT_PX = 22;
+var EMBED_PLACEHOLDER_BASE_HEIGHT_PX = 24;
+var EMBED_PLACEHOLDER_MIN_LINES = 2;
+var EMBED_PLACEHOLDER_MAX_LINES = 10;
+function hashString(value) {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index++) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(16);
+}
+function normalizeMeasuredPx(value) {
+  if (value === void 0 || !Number.isFinite(value)) {
+    return -1;
+  }
+  return Math.round(value / 4) * 4;
+}
 function buildTargetSignature(target) {
-  var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k;
-  return `${target.from}:${target.to}:${target.mode}:${target.uuid}:${target.blockWidget ? 1 : 0}:${target.preserveListMarker ? 1 : 0}:${(_a = target.availableInlineWidthPx) != null ? _a : -1}:${target.renderAsListItem ? 1 : 0}:${(_b = target.indentColumns) != null ? _b : 0}:${(_c = target.listMarkerOffsetPx) != null ? _c : -1}:${(_d = target.listContentOffsetPx) != null ? _d : -1}:${(_e = target.revealPos) != null ? _e : -1}:${(_f = target.revealFrom) != null ? _f : -1}:${(_g = target.revealTo) != null ? _g : -1}:${(_h = target.cardPos) != null ? _h : -1}:${(_i = target.refId) != null ? _i : ""}:${(_j = target.lineHeightPx) != null ? _j : -1}:${(_k = target.reservedHeightPx) != null ? _k : -1}`;
+  var _a, _b, _c, _d, _e, _f;
+  return `${target.from}:${target.to}:${target.mode}:${target.uuid}:${target.blockWidget ? 1 : 0}:${target.preserveListMarker ? 1 : 0}:${normalizeMeasuredPx(target.availableInlineWidthPx)}:${target.renderAsListItem ? 1 : 0}:${(_a = target.indentColumns) != null ? _a : 0}:${normalizeMeasuredPx(target.listMarkerOffsetPx)}:${normalizeMeasuredPx(target.listContentOffsetPx)}:${(_b = target.revealPos) != null ? _b : -1}:${(_c = target.revealFrom) != null ? _c : -1}:${(_d = target.revealTo) != null ? _d : -1}:${(_e = target.cardPos) != null ? _e : -1}:${(_f = target.refId) != null ? _f : ""}:${normalizeMeasuredPx(target.lineHeightPx)}`;
 }
 function buildRenderSignature(target) {
-  var _a, _b, _c, _d, _e;
-  return `${target.from}:${target.to}:${target.mode}:${target.uuid}:${target.preserveListMarker ? 1 : 0}:${(_a = target.availableInlineWidthPx) != null ? _a : -1}:${target.renderAsListItem ? 1 : 0}:${(_b = target.refId) != null ? _b : ""}:${(_c = target.listMarkerOffsetPx) != null ? _c : -1}:${(_d = target.listContentOffsetPx) != null ? _d : -1}:${(_e = target.lineHeightPx) != null ? _e : -1}`;
+  var _a;
+  return `${target.from}:${target.to}:${target.mode}:${target.uuid}:${target.preserveListMarker ? 1 : 0}:${normalizeMeasuredPx(target.availableInlineWidthPx)}:${target.renderAsListItem ? 1 : 0}:${(_a = target.refId) != null ? _a : ""}:${normalizeMeasuredPx(target.listMarkerOffsetPx)}:${normalizeMeasuredPx(target.listContentOffsetPx)}:${normalizeMeasuredPx(target.lineHeightPx)}`;
 }
 function getTargetRefId(target) {
   var _a;
@@ -680,11 +701,13 @@ function createAsyncBlockRendererPlugin(plugin) {
         this.listEmbedLayoutCache = /* @__PURE__ */ new Map();
         this.listEmbedOverlayStates = /* @__PURE__ */ new Map();
         this.listEmbedOverlayEntries = /* @__PURE__ */ new Map();
+        this.embedHeightCache = /* @__PURE__ */ new Map();
+        this.scanDebounceTimer = null;
+        this.lastScanFingerprint = "";
         this.component = new import_obsidian3.Component();
         plugin.addChild(this.component);
         this.overlayRoot = this.createOverlayRoot();
-        this.debouncedScan = this.debounce(this.scanAndRender.bind(this), 200);
-        this.debouncedScan();
+        this.scheduleScan();
       }
       update(update) {
         if (this.revealedEmbedPos !== null && update.docChanged) {
@@ -693,8 +716,8 @@ function createAsyncBlockRendererPlugin(plugin) {
         if (update.focusChanged && !this.view.hasFocus) {
           this.revealedEmbedPos = null;
         }
-        if (update.docChanged || update.viewportChanged || update.selectionSet || update.focusChanged) {
-          this.debouncedScan();
+        if (update.docChanged || update.selectionSet || update.focusChanged || update.geometryChanged) {
+          this.scheduleScan();
         }
       }
       destroy() {
@@ -702,8 +725,12 @@ function createAsyncBlockRendererPlugin(plugin) {
         this.listEmbedOverlayEntries.clear();
         this.inlineEmbedWidthCache.clear();
         this.listEmbedLayoutCache.clear();
+        this.embedHeightCache.clear();
         this.overlayRoot.remove();
         this.view.scrollDOM.classList.remove("logseq-overlay-host");
+        if (this.scanDebounceTimer) {
+          clearTimeout(this.scanDebounceTimer);
+        }
         this.component.unload();
         this.runningRenders.forEach(({ controller }) => controller.abort());
       }
@@ -714,15 +741,44 @@ function createAsyncBlockRendererPlugin(plugin) {
         this.view.scrollDOM.appendChild(root);
         return root;
       }
-      debounce(func, delay) {
-        let timeout;
-        return () => {
-          clearTimeout(timeout);
-          timeout = setTimeout(func, delay);
-        };
+      scheduleScan() {
+        if (this.scanDebounceTimer) {
+          clearTimeout(this.scanDebounceTimer);
+        }
+        this.scanDebounceTimer = setTimeout(() => {
+          this.scanDebounceTimer = null;
+          this.scanAndRender();
+        }, LIVE_PREVIEW_SCAN_DEBOUNCE_MS);
       }
       selectionOverlapsRange(from, to) {
         return this.view.state.selection.ranges.some((range) => range.from <= to && range.to >= from);
+      }
+      estimateEmbedPlaceholderHeight(uuid) {
+        const block = plugin.indexService.getBlock(uuid);
+        if (!block) {
+          return EMBED_PLACEHOLDER_BASE_HEIGHT_PX + EMBED_PLACEHOLDER_MIN_LINES * EMBED_PLACEHOLDER_LINE_HEIGHT_PX;
+        }
+        const combinedContent = [block.rawContent, block.childrenMarkdown].filter((value) => value && value.trim().length > 0).join("\n");
+        if (!combinedContent) {
+          return EMBED_PLACEHOLDER_BASE_HEIGHT_PX + EMBED_PLACEHOLDER_MIN_LINES * EMBED_PLACEHOLDER_LINE_HEIGHT_PX;
+        }
+        const lineCount = combinedContent.split(/\r?\n/).length;
+        const estimatedLines = Math.max(
+          EMBED_PLACEHOLDER_MIN_LINES,
+          Math.min(lineCount + 1, EMBED_PLACEHOLDER_MAX_LINES)
+        );
+        return EMBED_PLACEHOLDER_BASE_HEIGHT_PX + estimatedLines * EMBED_PLACEHOLDER_LINE_HEIGHT_PX;
+      }
+      getReservedHeightPx(target) {
+        if (target.mode !== "embed") {
+          return 0;
+        }
+        const refId = getTargetRefId(target);
+        const cachedHeight = this.embedHeightCache.get(refId);
+        if (cachedHeight && cachedHeight > 0) {
+          return cachedHeight;
+        }
+        return this.estimateEmbedPlaceholderHeight(target.uuid);
       }
       measureListEmbedLayout(target) {
         var _a, _b;
@@ -761,7 +817,7 @@ function createAsyncBlockRendererPlugin(plugin) {
         return { availableWidthPx };
       }
       measureRenderTarget(target) {
-        var _a, _b, _c, _d;
+        const reservedHeightPx = this.getReservedHeightPx(target);
         if (target.preserveListMarker) {
           const refId2 = getTargetRefId(target);
           const measuredWidth = this.measureInlineEmbedWidth(target);
@@ -774,11 +830,15 @@ function createAsyncBlockRendererPlugin(plugin) {
           }
           return {
             ...target,
-            availableInlineWidthPx: inlineWidth.availableWidthPx
+            availableInlineWidthPx: inlineWidth.availableWidthPx,
+            reservedHeightPx
           };
         }
         if (!target.renderAsListItem) {
-          return target;
+          return {
+            ...target,
+            reservedHeightPx
+          };
         }
         const refId = getTargetRefId(target);
         const measuredLayout = this.measureListEmbedLayout(target);
@@ -789,7 +849,7 @@ function createAsyncBlockRendererPlugin(plugin) {
         if (!layout) {
           return {
             ...target,
-            reservedHeightPx: (_b = (_a = this.listEmbedOverlayStates.get(refId)) == null ? void 0 : _a.reservedHeightPx) != null ? _b : 0
+            reservedHeightPx
           };
         }
         return {
@@ -797,8 +857,44 @@ function createAsyncBlockRendererPlugin(plugin) {
           listMarkerOffsetPx: layout.markerOffsetPx,
           listContentOffsetPx: layout.contentOffsetPx,
           lineHeightPx: layout.lineHeight,
-          reservedHeightPx: (_d = (_c = this.listEmbedOverlayStates.get(refId)) == null ? void 0 : _c.reservedHeightPx) != null ? _d : 0
+          reservedHeightPx
         };
+      }
+      createEmbedInteraction(target, widgetSignature) {
+        var _a;
+        return {
+          from: target.from,
+          to: target.to,
+          revealPos: (_a = target.revealPos) != null ? _a : target.from,
+          blockWidget: target.blockWidget,
+          preserveListMarker: target.preserveListMarker,
+          availableInlineWidthPx: target.availableInlineWidthPx,
+          listPrefixColumns: target.renderAsListItem ? target.indentColumns : void 0,
+          listMarkerOffsetPx: target.listMarkerOffsetPx,
+          listContentOffsetPx: target.listContentOffsetPx,
+          cardPos: target.cardPos,
+          refId: getTargetRefId(target),
+          signature: widgetSignature,
+          lineHeightPx: target.lineHeightPx,
+          reservedHeightPx: target.reservedHeightPx
+        };
+      }
+      captureRenderedEmbedHeight(refId) {
+        this.view.requestMeasure({
+          read: () => {
+            const widget = this.view.scrollDOM.querySelector(`.logseq-block-embed-widget[data-logseq-ref-id="${CSS.escape(refId)}"]`);
+            if (!(widget instanceof HTMLElement)) {
+              return null;
+            }
+            const height = Math.ceil(widget.getBoundingClientRect().height);
+            return height > 0 ? height : null;
+          },
+          write: (height) => {
+            if (typeof height === "number" && height > 0) {
+              this.embedHeightCache.set(refId, height);
+            }
+          }
+        });
       }
       buildListEmbedCard(target, html) {
         var _a;
@@ -940,9 +1036,24 @@ function createAsyncBlockRendererPlugin(plugin) {
         return true;
       }
       scanAndRender() {
+        var _a;
         const currentWidgets = this.view.state.field(blockReferenceField);
         const doc = this.view.state.doc;
-        const rawTargets = collectRenderTargets(doc.sliceString(0, doc.length));
+        const docText = doc.sliceString(0, doc.length);
+        const selectionFingerprint = this.view.state.selection.ranges.map((range) => `${range.from}:${range.to}`).join("|");
+        const contentWidth = Math.round(this.view.contentDOM.getBoundingClientRect().width);
+        const scanFingerprint = [
+          hashString(docText),
+          selectionFingerprint,
+          (_a = this.revealedEmbedPos) != null ? _a : -1,
+          this.view.hasFocus ? 1 : 0,
+          contentWidth
+        ].join(":");
+        if (scanFingerprint === this.lastScanFingerprint) {
+          return;
+        }
+        this.lastScanFingerprint = scanFingerprint;
+        const rawTargets = collectRenderTargets(docText);
         this.syncRevealedEmbedTarget(rawTargets);
         const targets = rawTargets.map((target) => this.measureRenderTarget(target));
         const activeTargets = /* @__PURE__ */ new Map();
@@ -989,7 +1100,7 @@ function createAsyncBlockRendererPlugin(plugin) {
         }
       }
       async triggerRender(target) {
-        var _a, _b, _c, _d, _e;
+        var _a, _b, _c;
         const controller = new AbortController();
         const renderSignature = buildRenderSignature(target);
         const widgetSignature = buildTargetSignature(target);
@@ -1001,26 +1112,11 @@ function createAsyncBlockRendererPlugin(plugin) {
               to: target.to,
               uuid: target.uuid,
               mode: target.mode,
-              interaction: target.mode === "embed" ? {
-                from: target.from,
-                to: target.to,
-                revealPos: (_a = target.revealPos) != null ? _a : target.from,
-                blockWidget: target.blockWidget,
-                preserveListMarker: target.preserveListMarker,
-                availableInlineWidthPx: target.availableInlineWidthPx,
-                listPrefixColumns: target.renderAsListItem ? target.indentColumns : void 0,
-                listMarkerOffsetPx: target.listMarkerOffsetPx,
-                listContentOffsetPx: target.listContentOffsetPx,
-                cardPos: target.cardPos,
-                refId: getTargetRefId(target),
-                signature: widgetSignature,
-                lineHeightPx: target.lineHeightPx,
-                reservedHeightPx: target.reservedHeightPx
-              } : void 0
+              interaction: target.mode === "embed" ? this.createEmbedInteraction(target, widgetSignature) : void 0
             })
           });
           if (target.mode === "inline") {
-            const summary = (_b = plugin.getInlineReferenceText(target.uuid)) != null ? _b : "[missing block]";
+            const summary = (_a = plugin.getInlineReferenceText(target.uuid)) != null ? _a : "[missing block]";
             if (controller.signal.aborted) {
               return;
             }
@@ -1034,36 +1130,23 @@ function createAsyncBlockRendererPlugin(plugin) {
             });
             return;
           }
-          const sourcePath = (_d = (_c = this.view.state.field(import_obsidian3.editorInfoField).file) == null ? void 0 : _c.path) != null ? _d : "";
+          const sourcePath = (_c = (_b = this.view.state.field(import_obsidian3.editorInfoField).file) == null ? void 0 : _b.path) != null ? _c : "";
           const embedInnerHtml = await plugin.buildEmbedHtml(target.uuid, sourcePath, this.component);
           const html = `<div class="logseq-live-preview-embed-layout"><div class="logseq-block-embed logseq-live-preview-embed-card">${embedInnerHtml}</div></div>`;
           if (controller.signal.aborted) {
             return;
           }
+          const refId = getTargetRefId(target);
           this.view.dispatch({
             effects: setRenderedWidgetEffect.of({
               from: target.from,
               to: target.to,
               content: html,
               mode: "embed",
-              interaction: {
-                from: target.from,
-                to: target.to,
-                revealPos: (_e = target.revealPos) != null ? _e : target.from,
-                blockWidget: target.blockWidget,
-                preserveListMarker: target.preserveListMarker,
-                availableInlineWidthPx: target.availableInlineWidthPx,
-                listPrefixColumns: target.renderAsListItem ? target.indentColumns : void 0,
-                listMarkerOffsetPx: target.listMarkerOffsetPx,
-                listContentOffsetPx: target.listContentOffsetPx,
-                cardPos: target.cardPos,
-                refId: getTargetRefId(target),
-                signature: widgetSignature,
-                lineHeightPx: target.lineHeightPx,
-                reservedHeightPx: target.reservedHeightPx
-              }
+              interaction: this.createEmbedInteraction(target, widgetSignature)
             })
           });
+          this.captureRenderedEmbedHeight(refId);
         } catch (error) {
           console.error("Logseq Block Ref Enhancer Error:", error);
         } finally {
@@ -1092,6 +1175,12 @@ var MAX_INLINE_SUMMARY_LENGTH = 60;
 var STANDALONE_EMBED_REGEX = /^\s*\{\{embed\s+\(\(([A-Za-z0-9_-]{36,})\)\)\s*\}\}\s*$/;
 var MANUAL_RENDER_SCOPE_ATTR = "data-logseq-manual-render";
 var MANAGED_NODE_ATTR = "data-logseq-managed-node";
+var EMBED_PLACEHOLDER_LINE_HEIGHT_PX2 = 22;
+var EMBED_PLACEHOLDER_BASE_HEIGHT_PX2 = 24;
+var EMBED_PLACEHOLDER_MIN_LINES2 = 2;
+var EMBED_PLACEHOLDER_MAX_LINES2 = 10;
+var READING_MODE_SCROLL_IDLE_MS = 180;
+var SCROLL_ANCHOR_SAMPLE_OFFSETS_PX = [16, 32, 48, 72];
 function createBlockReferenceRegex() {
   return /\{\{embed\s+\(\(([A-Za-z0-9_-]{36,})\)\)\s*\}\}|\(\(([A-Za-z0-9_-]{36,})\)\)|（（([A-Za-z0-9_-]{36,})））/g;
 }
@@ -1100,12 +1189,21 @@ var ReferencePostProcessChild = class extends import_obsidian4.MarkdownRenderChi
     super(containerEl);
     this.plugin = plugin;
     this.sourcePath = sourcePath;
+    this.readingModeQueueRoot = null;
   }
   async onload() {
+    this.readingModeQueueRoot = this.plugin.attachReadingModeRenderQueue(this.containerEl);
     await this.plugin.processRenderedReferences(this.containerEl, this.sourcePath, this, /* @__PURE__ */ new Set());
+  }
+  onunload() {
+    this.plugin.detachReadingModeRenderQueue(this.readingModeQueueRoot);
   }
 };
 var LogseqBlockRefEnhancer = class extends import_obsidian4.Plugin {
+  constructor() {
+    super(...arguments);
+    this.readingModeRenderQueues = /* @__PURE__ */ new Map();
+  }
   async onload() {
     await this.loadSettings();
     this.indexService = new IndexService(this.app, this.manifest.dir);
@@ -1225,6 +1323,243 @@ ${indentation}  id:: ${blockId}`;
     await this.populateEmbedContainer(host, uuid, sourcePath, component, /* @__PURE__ */ new Set());
     return host.innerHTML;
   }
+  attachReadingModeRenderQueue(element) {
+    const previewRoot = this.resolveReadingModePreviewRoot(element);
+    if (!previewRoot) {
+      return null;
+    }
+    const existingQueue = this.readingModeRenderQueues.get(previewRoot);
+    if (existingQueue) {
+      existingQueue.retainCount += 1;
+      return previewRoot;
+    }
+    const scrollRoot = this.findReadingModeScrollRoot(previewRoot);
+    const queue = {
+      previewRoot,
+      scrollRoot,
+      tasks: [],
+      scrollListener: () => {
+        const activeQueue = this.readingModeRenderQueues.get(previewRoot);
+        if (!activeQueue) {
+          return;
+        }
+        activeQueue.isScrolling = true;
+        if (activeQueue.idleTimer !== null) {
+          window.clearTimeout(activeQueue.idleTimer);
+        }
+        activeQueue.idleTimer = window.setTimeout(() => {
+          const latestQueue = this.readingModeRenderQueues.get(previewRoot);
+          if (!latestQueue) {
+            return;
+          }
+          latestQueue.idleTimer = null;
+          latestQueue.isScrolling = false;
+          this.scheduleReadingModeRenderQueueFlush(previewRoot);
+        }, READING_MODE_SCROLL_IDLE_MS);
+      },
+      idleTimer: null,
+      isScrolling: false,
+      isFlushing: false,
+      isFlushScheduled: false,
+      retainCount: 1
+    };
+    scrollRoot.addEventListener("scroll", queue.scrollListener, { passive: true });
+    this.readingModeRenderQueues.set(previewRoot, queue);
+    return previewRoot;
+  }
+  detachReadingModeRenderQueue(previewRoot) {
+    if (!previewRoot) {
+      return;
+    }
+    const queue = this.readingModeRenderQueues.get(previewRoot);
+    if (!queue) {
+      return;
+    }
+    queue.retainCount -= 1;
+    if (queue.retainCount > 0) {
+      return;
+    }
+    if (queue.idleTimer !== null) {
+      window.clearTimeout(queue.idleTimer);
+    }
+    queue.scrollRoot.removeEventListener("scroll", queue.scrollListener);
+    queue.tasks.length = 0;
+    this.readingModeRenderQueues.delete(previewRoot);
+  }
+  resolveReadingModePreviewRoot(element) {
+    const previewRoot = element.closest(".markdown-reading-view, .markdown-preview-view");
+    if (previewRoot instanceof HTMLElement) {
+      return previewRoot;
+    }
+    const renderedRoot = element.closest(".markdown-rendered");
+    return renderedRoot instanceof HTMLElement ? renderedRoot : null;
+  }
+  findReadingModeScrollRoot(previewRoot) {
+    let current = previewRoot;
+    while (current) {
+      const style = window.getComputedStyle(current);
+      const isScrollable = /(auto|scroll)/.test(style.overflowY) && current.scrollHeight > current.clientHeight;
+      if (isScrollable) {
+        return current;
+      }
+      current = current.parentElement;
+    }
+    return previewRoot;
+  }
+  enqueueReadingModeEmbedRender(previewRoot, task) {
+    const queue = this.readingModeRenderQueues.get(previewRoot);
+    if (!queue) {
+      void this.populateEmbedContainer(task.host, task.uuid, task.sourcePath, task.component, task.visitedEmbeds);
+      return;
+    }
+    queue.tasks.push(task);
+    this.scheduleReadingModeRenderQueueFlush(previewRoot);
+  }
+  scheduleReadingModeRenderQueueFlush(previewRoot) {
+    const queue = this.readingModeRenderQueues.get(previewRoot);
+    if (!queue || queue.isFlushing || queue.isFlushScheduled || queue.isScrolling) {
+      return;
+    }
+    queue.isFlushScheduled = true;
+    window.setTimeout(() => {
+      const latestQueue = this.readingModeRenderQueues.get(previewRoot);
+      if (!latestQueue) {
+        return;
+      }
+      latestQueue.isFlushScheduled = false;
+      void this.flushReadingModeRenderQueue(previewRoot);
+    }, 0);
+  }
+  async flushReadingModeRenderQueue(previewRoot) {
+    const queue = this.readingModeRenderQueues.get(previewRoot);
+    if (!queue || queue.isFlushing || queue.isScrolling) {
+      return;
+    }
+    queue.isFlushing = true;
+    try {
+      while (queue.tasks.length > 0) {
+        if (queue.isScrolling) {
+          break;
+        }
+        const task = queue.tasks.shift();
+        if (!task || !task.host.isConnected) {
+          continue;
+        }
+        const scrollAnchor = this.captureScrollAnchor(queue.previewRoot, queue.scrollRoot, task.host);
+        await this.populateEmbedContainer(task.host, task.uuid, task.sourcePath, task.component, task.visitedEmbeds);
+        this.restoreScrollAnchor(queue.scrollRoot, scrollAnchor);
+        await this.waitForNextAnimationFrame();
+        this.restoreScrollAnchor(queue.scrollRoot, scrollAnchor);
+      }
+    } finally {
+      queue.isFlushing = false;
+      if (queue.tasks.length > 0 && !queue.isScrolling) {
+        this.scheduleReadingModeRenderQueueFlush(previewRoot);
+      }
+    }
+  }
+  captureScrollAnchor(previewRoot, scrollRoot, excludedHost) {
+    if (!previewRoot.isConnected || !scrollRoot.isConnected) {
+      return null;
+    }
+    const scrollRect = scrollRoot.getBoundingClientRect();
+    if (scrollRect.height <= 1 || scrollRect.width <= 1) {
+      return null;
+    }
+    const x = Math.min(scrollRect.right - 12, Math.max(scrollRect.left + 12, scrollRect.left + 48));
+    for (const offset of SCROLL_ANCHOR_SAMPLE_OFFSETS_PX) {
+      const y = Math.min(scrollRect.bottom - 1, scrollRect.top + offset);
+      if (y <= scrollRect.top) {
+        continue;
+      }
+      const hitElement = document.elementFromPoint(x, y);
+      if (!(hitElement instanceof HTMLElement)) {
+        continue;
+      }
+      const anchor = this.normalizeScrollAnchor(previewRoot, hitElement, excludedHost);
+      if (anchor) {
+        return {
+          element: anchor,
+          top: anchor.getBoundingClientRect().top
+        };
+      }
+    }
+    return this.findVisibleScrollAnchorFallback(previewRoot, scrollRoot, excludedHost);
+  }
+  findVisibleScrollAnchorFallback(previewRoot, scrollRoot, excludedHost) {
+    const scrollRect = scrollRoot.getBoundingClientRect();
+    const walker = document.createTreeWalker(previewRoot, NodeFilter.SHOW_ELEMENT);
+    while (walker.nextNode()) {
+      const candidate = walker.currentNode;
+      if (!(candidate instanceof HTMLElement)) {
+        continue;
+      }
+      if (candidate === excludedHost || excludedHost.contains(candidate)) {
+        continue;
+      }
+      const managedAncestor = candidate.closest(`[${MANAGED_NODE_ATTR}="true"]`);
+      if (managedAncestor instanceof HTMLElement) {
+        continue;
+      }
+      const rect = candidate.getBoundingClientRect();
+      if (rect.height <= 0 || rect.width <= 0) {
+        continue;
+      }
+      if (rect.bottom < scrollRect.top || rect.top > scrollRect.bottom) {
+        continue;
+      }
+      return {
+        element: candidate,
+        top: rect.top
+      };
+    }
+    return null;
+  }
+  normalizeScrollAnchor(previewRoot, element, excludedHost) {
+    let current = element;
+    while (current) {
+      if (current === excludedHost || excludedHost.contains(current)) {
+        return null;
+      }
+      if (current === previewRoot) {
+        break;
+      }
+      if (previewRoot.contains(current)) {
+        const managedAncestor = current.closest(`[${MANAGED_NODE_ATTR}="true"]`);
+        if (managedAncestor instanceof HTMLElement && managedAncestor !== excludedHost) {
+          current = managedAncestor.parentElement;
+          continue;
+        }
+        const rect = current.getBoundingClientRect();
+        if (rect.height > 0 && rect.width > 0) {
+          return current;
+        }
+      }
+      current = current.parentElement;
+    }
+    const fallback = previewRoot.firstElementChild;
+    return fallback instanceof HTMLElement ? fallback : null;
+  }
+  restoreScrollAnchor(scrollRoot, snapshot) {
+    if (!snapshot || !snapshot.element.isConnected || !scrollRoot.isConnected) {
+      return;
+    }
+    const currentTop = snapshot.element.getBoundingClientRect().top;
+    const delta = currentTop - snapshot.top;
+    if (Math.abs(delta) < 0.5) {
+      return;
+    }
+    scrollRoot.scrollTop += delta;
+  }
+  waitForNextAnimationFrame() {
+    return new Promise((resolve) => {
+      if (typeof window.requestAnimationFrame === "function") {
+        window.requestAnimationFrame(() => resolve());
+        return;
+      }
+      window.setTimeout(resolve, 16);
+    });
+  }
   markManualRenderScope(element) {
     element.setAttribute(MANUAL_RENDER_SCOPE_ATTR, "true");
   }
@@ -1234,6 +1569,43 @@ ${indentation}  id:: ${blockId}`;
     inlineRef.setAttribute(MANAGED_NODE_ATTR, "true");
     inlineRef.setText(summary);
     return inlineRef;
+  }
+  estimateEmbedPlaceholderHeight(uuid) {
+    const block = this.indexService.getBlock(uuid);
+    if (!block) {
+      return null;
+    }
+    const combinedContent = [block.rawContent, block.childrenMarkdown].filter((value) => value && value.trim().length > 0).join("\n");
+    if (!combinedContent) {
+      return EMBED_PLACEHOLDER_BASE_HEIGHT_PX2 + EMBED_PLACEHOLDER_MIN_LINES2 * EMBED_PLACEHOLDER_LINE_HEIGHT_PX2;
+    }
+    const lineCount = combinedContent.split(/\r?\n/).length;
+    const estimatedLines = Math.max(
+      EMBED_PLACEHOLDER_MIN_LINES2,
+      Math.min(lineCount + 1, EMBED_PLACEHOLDER_MAX_LINES2)
+    );
+    return EMBED_PLACEHOLDER_BASE_HEIGHT_PX2 + estimatedLines * EMBED_PLACEHOLDER_LINE_HEIGHT_PX2;
+  }
+  prepareEmbedContainer(container, uuid) {
+    container.empty();
+    container.removeClass("logseq-block-ref-enhancer-error");
+    container.addClass("logseq-block-embed", "is-loading");
+    container.setAttribute(MANAGED_NODE_ATTR, "true");
+    this.markManualRenderScope(container);
+    const placeholderHeight = this.estimateEmbedPlaceholderHeight(uuid);
+    if (placeholderHeight !== null) {
+      container.style.setProperty("--logseq-embed-placeholder-height", `${placeholderHeight}px`);
+    } else {
+      container.style.removeProperty("--logseq-embed-placeholder-height");
+    }
+    const placeholder = document.createElement("div");
+    placeholder.addClass("logseq-block-embed-placeholder");
+    container.appendChild(placeholder);
+  }
+  finalizeEmbedContainer(container, contentNodes) {
+    container.replaceChildren(...contentNodes);
+    container.removeClass("is-loading");
+    container.style.removeProperty("--logseq-embed-placeholder-height");
   }
   shouldSkipTextNode(node, root) {
     const parentElement = node.parentElement;
@@ -1256,16 +1628,18 @@ ${indentation}  id:: ${blockId}`;
   }
   async populateEmbedContainer(container, uuid, sourcePath, component, visitedEmbeds) {
     var _a;
-    container.empty();
-    container.addClass("logseq-block-embed");
-    this.markManualRenderScope(container);
+    this.prepareEmbedContainer(container, uuid);
     if (visitedEmbeds.has(uuid)) {
+      container.empty();
+      container.removeClass("is-loading");
       container.addClass("logseq-block-ref-enhancer-error");
       container.setText("Cyclic embed");
       return;
     }
     const block = this.indexService.getBlock(uuid);
     if (!block) {
+      container.empty();
+      container.removeClass("is-loading");
       container.addClass("logseq-block-ref-enhancer-error");
       container.setText("Missing block");
       return;
@@ -1274,21 +1648,24 @@ ${indentation}  id:: ${blockId}`;
     nextVisitedEmbeds.add(uuid);
     const rootContainer = document.createElement("div");
     rootContainer.addClass("logseq-block-embed-root");
-    container.appendChild(rootContainer);
     await this.renderMarkdownAndProcess(rootContainer, block.rawContent, sourcePath, component, nextVisitedEmbeds);
+    const contentNodes = [rootContainer];
     const childMarkdown = (_a = block.childrenMarkdown) == null ? void 0 : _a.trim();
     if (childMarkdown) {
       const childrenContainer = document.createElement("div");
       childrenContainer.addClass("logseq-block-embed-children");
-      container.appendChild(childrenContainer);
       await this.renderMarkdownAndProcess(childrenContainer, childMarkdown, sourcePath, component, nextVisitedEmbeds);
+      contentNodes.push(childrenContainer);
     }
+    this.finalizeEmbedContainer(container, contentNodes);
   }
   async processRenderedReferences(element, sourcePath, component, visitedEmbeds) {
     var _a, _b, _c, _d;
+    const previewRoot = element.isConnected ? this.resolveReadingModePreviewRoot(element) : null;
     const probeRegex = createBlockReferenceRegex();
     const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
     const nodesToProcess = [];
+    const deferredEmbedTasks = [];
     while (walker.nextNode()) {
       const node = walker.currentNode;
       if (this.shouldSkipTextNode(node, element)) {
@@ -1313,7 +1690,18 @@ ${indentation}  id:: ${blockId}`;
         } else {
           (_a = node.parentNode) == null ? void 0 : _a.replaceChild(embedHost, node);
         }
-        await this.populateEmbedContainer(embedHost, standaloneEmbedMatch[1], sourcePath, component, visitedEmbeds);
+        if (previewRoot && embedHost.isConnected) {
+          this.prepareEmbedContainer(embedHost, standaloneEmbedMatch[1]);
+          deferredEmbedTasks.push({
+            host: embedHost,
+            uuid: standaloneEmbedMatch[1],
+            sourcePath,
+            component,
+            visitedEmbeds: new Set(visitedEmbeds)
+          });
+        } else {
+          await this.populateEmbedContainer(embedHost, standaloneEmbedMatch[1], sourcePath, component, visitedEmbeds);
+        }
         continue;
       }
       let lastIndex = 0;
@@ -1341,6 +1729,11 @@ ${indentation}  id:: ${blockId}`;
       }
       fragment.appendChild(document.createTextNode(text.slice(lastIndex)));
       (_d = node.parentNode) == null ? void 0 : _d.replaceChild(fragment, node);
+    }
+    if (previewRoot) {
+      for (const task of deferredEmbedTasks) {
+        this.enqueueReadingModeEmbedRender(previewRoot, task);
+      }
     }
   }
   async readingModeRenderer(element, context) {

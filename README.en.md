@@ -32,6 +32,8 @@ The current release is best understood as a viewer:
 
 ## Current status
 
+- Live Preview editor scrolling is now stable when passing block embeds, and the slow auto-scroll issue in editing mode has been fixed
+- High-frequency console spam caused by repeated block lookups in editing mode has been fixed
 - Reading Mode is usable overall, but long pages with many block embeds may still continue scrolling on their own while async embeds finish rendering
 - Live Preview is usable
 - Complex list layouts and some themes may still show small visual differences in Live Preview
