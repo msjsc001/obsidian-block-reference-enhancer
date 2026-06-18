@@ -17,6 +17,7 @@ The current release is best understood as a viewer:
 - Trigger block autocomplete by typing `((`
 - Copy the current block reference with a command
 - Scan the vault, build an index, and use a local cache
+- Keep index phase and summary information visible in the status bar
 - Rebuild the block index manually with a command
 - Keep showing cached content when a source block disappears but references still exist
 - Review missing source blocks and recover them
@@ -43,6 +44,34 @@ After the plugin is enabled:
 - If you changed many files outside Obsidian, rebuilding the index manually is recommended
 - If no local cache file exists, startup shows that a fresh full index build is running
 
+### Status bar and index states
+
+After the plugin is enabled, the status bar shows `Block index: ...` messages. This is the plugin's own block-index status, not Obsidian's search index status.
+
+Common states:
+- `Block index: loading cache...`
+  The plugin is reading the local cache.
+- `Block index: no cache found, building full index...`
+  No usable local cache exists, so the plugin is running a first full index build.
+- `Block index: cache loaded, checking vault changes...`
+  The cache was loaded and the plugin is checking whether vault Markdown files still match it.
+- `Block index: checking vault changes...`
+  The plugin is checking for external changes before file-by-file reconciliation starts.
+- `Block index: reconciling X/Y files | A changed | B removed`
+  The plugin detected changed or removed files and is reconciling the cache against the real vault state.
+- `Block index: building X/Y files | N blocks | M refs`
+  A full rebuild is running, with live file/block/reference counts.
+- `Block index: ready | F files | B blocks | R refs`
+  Startup indexing is finished. The summary stays in the status bar so you can confirm the plugin is ready.
+- `Block index: rebuild failed`
+  A manual rebuild failed and should be checked in the console or retried.
+
+Additional notes:
+- Normal create/modify/delete/rename updates after startup are incremental and usually do not show persistent progress UI.
+- The first startup full build shows a completion notice once it finishes.
+- A manual `Rebuild block reference index` also shows a completion notice with file, block, and reference counts.
+- If the status bar has stabilized on `Block index: ready ...`, the plugin has usually finished its current startup indexing work.
+
 ## Current status
 
 - Live Preview editor scrolling is now stable when passing block embeds, and the slow auto-scroll issue in editing mode has been fixed
@@ -66,6 +95,7 @@ Use it when:
 
 During rebuild:
 - The status bar shows indexing progress
+- If rebuild succeeds, the status bar returns to `Block index: ready | ...`
 - A completion notice reports file, block, and reference counts
 
 ### Review missing source blocks

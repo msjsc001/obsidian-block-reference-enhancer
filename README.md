@@ -28,6 +28,7 @@
 - 在编辑器中输入 `((` 使用块自动补全
 - 使用命令复制当前块引用
 - 自动扫描库内 Markdown 文件，建立索引并使用本地缓存
+- 在状态栏持续显示块索引阶段和当前统计信息
 - 支持命令手动重建块索引
 - 当源块丢失但引用还存在时，使用最后缓存内容继续显示
 - 支持审查缺失源块并恢复到恢复页
@@ -67,6 +68,34 @@
 - 索引完成后，状态栏会保留当前 `ready` 统计信息，方便确认插件已经完成启动期索引
 - 如果你在 Obsidian 之外通过 Logseq、同步工具、外部编辑器或 git 大量改动了文件，建议手动重建一次索引
 - 如果本地缓存文件不存在，插件启动时会提示正在建立新的完整索引
+
+### 状态栏与索引状态
+
+插件启用后，状态栏会显示 `Block index: ...` 相关信息。这是插件自己的块索引状态，不是 Obsidian 自带搜索索引的状态。
+
+你通常会看到这些状态：
+- `Block index: loading cache...`
+  插件正在读取本地缓存。
+- `Block index: no cache found, building full index...`
+  本地没有可用缓存，插件正在做第一次完整建索引。
+- `Block index: cache loaded, checking vault changes...`
+  缓存已加载，插件正在检查库里的 Markdown 文件是否和缓存一致。
+- `Block index: checking vault changes...`
+  正在检查是否有外部改动，但暂时还没有进入逐文件对账。
+- `Block index: reconciling X/Y files | A changed | B removed`
+  插件已经发现有改动，正在把实际文件和缓存重新对齐。
+- `Block index: building X/Y files | N blocks | M refs`
+  正在做完整重建，状态栏会实时显示已处理文件数、块数、引用数。
+- `Block index: ready | F files | B blocks | R refs`
+  启动期索引已经完成，当前统计信息会保留在状态栏中，方便确认插件已经准备好。
+- `Block index: rebuild failed`
+  手动重建失败，需要查看控制台日志或重试。
+
+补充说明：
+- 启动后的日常增删改重命名会静默更新索引，通常不会持续弹出进度提示。
+- 第一次完整建索引完成后，插件会弹出一次完成提示。
+- 手动执行 `Rebuild block reference index` 后，插件也会弹出一次完成提示，并显示文件数、块数、引用数。
+- 如果状态栏已经稳定显示 `Block index: ready ...`，通常就说明插件已经完成当前启动阶段的索引工作。
 
 ## 常用功能
 
@@ -121,6 +150,7 @@
 
 执行时：
 - 状态栏会显示索引进度
+- 如果重建成功，状态栏会回到 `Block index: ready | ...`
 - 完成后会弹出文件数、块数、引用数的结果提示
 
 ### 6. 审查缺失源块
