@@ -68,6 +68,17 @@ Already implemented in the current codebase:
    - Startup now exposes status-bar phases for cache loading, cache-based reconciliation, full rebuild, and ready state.
    - The status bar keeps a ready summary after startup instead of disappearing immediately.
 
+11. Live Preview rendering has been reduced for large-page performance.
+   - Structural target scanning is cached and no longer recomputes the full document on every selection or focus change.
+   - Live Preview rendering is now constrained to the visible viewport window plus margin instead of eagerly processing the whole note on every interaction.
+   - Embed rendering concurrency is limited so large pages do not flood the main thread with simultaneous Markdown render tasks.
+   - Geometry-change-triggered self-rescan loops were removed from the main update path.
+   - Document-change rescans now wait longer than viewport/focus rescans so typing stays ahead of background decoration refresh work.
+   - Selection-only rescans are skipped unless the selection actually touches an existing rendered target or an explicitly revealed embed source.
+   - A single scan now batches widget removals, inline updates, and embed loading placeholders into one CodeMirror transaction instead of dispatching many small transactions.
+   - Internal widget-driven layout changes now use a delayed coalesced rescan rather than immediately re-triggering viewport rescans after every placeholder or embed render.
+   - Inline references no longer go through a per-reference loading-state transaction during normal visible-range refreshes.
+
 ## Background
 
 This plugin is intended to make Obsidian understand a UUID-style outline Markdown workflow that is compatible with common Logseq note structure:

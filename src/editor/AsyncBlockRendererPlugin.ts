@@ -3,7 +3,6 @@ import { EditorSelection } from "@codemirror/state";
 import { EditorView, ViewPlugin, ViewUpdate } from "@codemirror/view";
 import {
     addLoadingWidgetEffect,
-    blockReferenceField,
     removeWidgetEffect,
     setRenderedWidgetEffect,
 } from "./BlockReferenceField";
@@ -67,25 +66,30 @@ interface InlineEmbedWidthGeometry {
     availableWidthPx: number;
 }
 
+interface VisibleWidgetState {
+    from: number;
+    to: number;
+    signature: string;
+}
+
+interface VisibleScanRange {
+    from: number;
+    to: number;
+}
+
 const EMBED_BLOCK_REF_REGEX = /\{\{embed\s+\(\(([A-Za-z0-9_-]{36,})\)\)\s*\}\}/y;
 const INLINE_BLOCK_REF_REGEX = /\(\(([A-Za-z0-9_-]{36,})\)\)/y;
 const FULLWIDTH_INLINE_BLOCK_REF_REGEX = /（（([A-Za-z0-9_-]{36,})））/y;
 const FENCE_REGEX = /^\s{0,3}(`{3,}|~{3,})/;
-const LIVE_PREVIEW_SCAN_DEBOUNCE_MS = 200;
+const LIVE_PREVIEW_DOC_SCAN_DEBOUNCE_MS = 450;
+const LIVE_PREVIEW_VIEWPORT_SCAN_DEBOUNCE_MS = 120;
+const LIVE_PREVIEW_INTERNAL_LAYOUT_RESCAN_DEBOUNCE_MS = 320;
 const EMBED_PLACEHOLDER_LINE_HEIGHT_PX = 22;
 const EMBED_PLACEHOLDER_BASE_HEIGHT_PX = 24;
 const EMBED_PLACEHOLDER_MIN_LINES = 2;
 const EMBED_PLACEHOLDER_MAX_LINES = 10;
-
-function hashString(value: string): string {
-    let hash = 2166136261;
-    for (let index = 0; index < value.length; index++) {
-        hash ^= value.charCodeAt(index);
-        hash = Math.imul(hash, 16777619);
-    }
-
-    return (hash >>> 0).toString(16);
-}
+const VISIBLE_SCAN_MARGIN_LINES = 12;
+const MAX_CONCURRENT_EMBED_RENDERS = 2;
 
 function normalizeMeasuredPx(value?: number): number {
     if (value === undefined || !Number.isFinite(value)) {
@@ -278,24 +282,30 @@ export function createAsyncBlockRendererPlugin(plugin: BlockReferenceEnhancer) {
             private revealedEmbedPos: number | null = null;
             private inlineEmbedWidthCache: Map<string, InlineEmbedWidthGeometry> = new Map();
             private listEmbedLayoutCache: Map<string, ListEmbedLayout> = new Map();
-            private overlayRoot: HTMLElement;
+            private overlayRoot: HTMLElement | null = null;
             private listEmbedOverlayStates: Map<string, ListEmbedOverlayState> = new Map();
             private listEmbedOverlayEntries: Map<string, ListEmbedOverlayEntry> = new Map();
             private embedHeightCache: Map<string, number> = new Map();
             private scanDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+            private postRenderRescanTimer: ReturnType<typeof setTimeout> | null = null;
             private lastScanFingerprint = "";
+            private cachedTargets: BlockRenderTarget[] = [];
+            private cachedTargetsDirty = true;
+            private documentScanVersion = 0;
+            private pendingEmbedRenderQueue: BlockRenderTarget[] = [];
+            private runningEmbedRenderCount = 0;
+            private visibleWidgetStates: Map<string, VisibleWidgetState> = new Map();
             private indexUpdatedRef: EventRef;
 
             constructor(private view: EditorView) {
                 this.component = new Component();
                 plugin.addChild(this.component);
-                this.overlayRoot = this.createOverlayRoot();
                 this.indexUpdatedRef = plugin.indexService.on("index-updated", () => {
                     this.lastScanFingerprint = "";
-                    this.scheduleScan();
+                    this.scheduleScan(LIVE_PREVIEW_VIEWPORT_SCAN_DEBOUNCE_MS);
                 });
 
-                this.scheduleScan();
+                this.scheduleScan(LIVE_PREVIEW_VIEWPORT_SCAN_DEBOUNCE_MS);
             }
 
             update(update: ViewUpdate) {
@@ -307,8 +317,28 @@ export function createAsyncBlockRendererPlugin(plugin: BlockReferenceEnhancer) {
                     this.revealedEmbedPos = null;
                 }
 
-                if (update.docChanged || update.selectionSet || update.focusChanged || update.geometryChanged) {
-                    this.scheduleScan();
+                if (update.docChanged) {
+                    this.cachedTargetsDirty = true;
+                    this.documentScanVersion += 1;
+                    this.scheduleScan(LIVE_PREVIEW_DOC_SCAN_DEBOUNCE_MS);
+                    return;
+                }
+
+                const internalWidgetUpdate = this.classifyInternalWidgetUpdate(update);
+                if (internalWidgetUpdate !== "none") {
+                    if (internalWidgetUpdate === "layout") {
+                        this.schedulePostRenderRescan();
+                    }
+                    return;
+                }
+
+                if (update.viewportChanged || update.focusChanged) {
+                    this.scheduleScan(LIVE_PREVIEW_VIEWPORT_SCAN_DEBOUNCE_MS);
+                    return;
+                }
+
+                if (update.selectionSet && (this.revealedEmbedPos !== null || this.selectionTouchesRenderedTarget())) {
+                    this.scheduleScan(LIVE_PREVIEW_VIEWPORT_SCAN_DEBOUNCE_MS);
                 }
             }
 
@@ -318,25 +348,36 @@ export function createAsyncBlockRendererPlugin(plugin: BlockReferenceEnhancer) {
                 this.inlineEmbedWidthCache.clear();
                 this.listEmbedLayoutCache.clear();
                 this.embedHeightCache.clear();
-                this.overlayRoot.remove();
-                this.view.scrollDOM.classList.remove("block-reference-overlay-host");
+                if (this.overlayRoot) {
+                    this.overlayRoot.remove();
+                    this.overlayRoot = null;
+                    this.view.scrollDOM.classList.remove("block-reference-overlay-host");
+                }
                 if (this.scanDebounceTimer) {
                     clearTimeout(this.scanDebounceTimer);
+                }
+                if (this.postRenderRescanTimer) {
+                    clearTimeout(this.postRenderRescanTimer);
                 }
                 this.component.unload();
                 this.runningRenders.forEach(({ controller }) => controller.abort());
                 plugin.indexService.offref(this.indexUpdatedRef);
             }
 
-            private createOverlayRoot(): HTMLElement {
+            private ensureOverlayRoot(): HTMLElement {
+                if (this.overlayRoot) {
+                    return this.overlayRoot;
+                }
+
                 this.view.scrollDOM.classList.add("block-reference-overlay-host");
                 const root = document.createElement("div");
                 root.className = "block-reference-live-preview-overlay-root";
                 this.view.scrollDOM.appendChild(root);
+                this.overlayRoot = root;
                 return root;
             }
 
-            private scheduleScan() {
+            private scheduleScan(delayMs: number) {
                 if (this.scanDebounceTimer) {
                     clearTimeout(this.scanDebounceTimer);
                 }
@@ -344,11 +385,65 @@ export function createAsyncBlockRendererPlugin(plugin: BlockReferenceEnhancer) {
                 this.scanDebounceTimer = setTimeout(() => {
                     this.scanDebounceTimer = null;
                     this.scanAndRender();
-                }, LIVE_PREVIEW_SCAN_DEBOUNCE_MS);
+                }, delayMs);
+            }
+
+            private schedulePostRenderRescan() {
+                if (this.postRenderRescanTimer) {
+                    clearTimeout(this.postRenderRescanTimer);
+                }
+
+                this.postRenderRescanTimer = setTimeout(() => {
+                    this.postRenderRescanTimer = null;
+                    this.scanAndRender();
+                }, LIVE_PREVIEW_INTERNAL_LAYOUT_RESCAN_DEBOUNCE_MS);
+            }
+
+            private classifyInternalWidgetUpdate(update: ViewUpdate): "none" | "inline-only" | "layout" {
+                let hasInlineOnlyEffect = false;
+
+                for (const transaction of update.transactions) {
+                    for (const effect of transaction.effects) {
+                        if (effect.is(removeWidgetEffect)) {
+                            const refId = effect.value.refId ?? "";
+                            if (!refId.startsWith("inline:")) {
+                                return "layout";
+                            }
+
+                            hasInlineOnlyEffect = true;
+                            continue;
+                        }
+
+                        if (effect.is(addLoadingWidgetEffect) || effect.is(setRenderedWidgetEffect)) {
+                            if (effect.value.mode === "embed") {
+                                return "layout";
+                            }
+
+                            hasInlineOnlyEffect = true;
+                        }
+                    }
+                }
+
+                return hasInlineOnlyEffect ? "inline-only" : "none";
             }
 
             private selectionOverlapsRange(from: number, to: number): boolean {
                 return this.view.state.selection.ranges.some((range) => range.from <= to && range.to >= from);
+            }
+
+            private selectionTouchesRenderedTarget(): boolean {
+                return this.view.state.selection.ranges.some((range) => {
+                    const queryFrom = Math.max(0, range.from - 1);
+                    const queryTo = Math.min(this.view.state.doc.length, range.to + 1);
+
+                    for (const widgetState of this.visibleWidgetStates.values()) {
+                        if (widgetState.to >= queryFrom && widgetState.from <= queryTo) {
+                            return true;
+                        }
+                    }
+
+                    return false;
+                });
             }
 
             private estimateEmbedPlaceholderHeight(uuid: string): number {
@@ -530,6 +625,62 @@ export function createAsyncBlockRendererPlugin(plugin: BlockReferenceEnhancer) {
                 });
             }
 
+            private ensureTargetsUpToDate() {
+                if (!this.cachedTargetsDirty) {
+                    return;
+                }
+
+                const doc = this.view.state.doc;
+                const docText = doc.sliceString(0, doc.length);
+                this.cachedTargets = collectRenderTargets(docText);
+                this.cachedTargetsDirty = false;
+            }
+
+            private expandRangeByLineMargin(from: number, to: number): VisibleScanRange {
+                const doc = this.view.state.doc;
+                const fromLine = Math.max(1, doc.lineAt(from).number - VISIBLE_SCAN_MARGIN_LINES);
+                const toLine = Math.min(doc.lines, doc.lineAt(Math.max(from, to - 1)).number + VISIBLE_SCAN_MARGIN_LINES);
+
+                return {
+                    from: doc.line(fromLine).from,
+                    to: doc.line(toLine).to,
+                };
+            }
+
+            private getVisibleScanRanges(): VisibleScanRange[] {
+                if (this.view.visibleRanges.length > 0) {
+                    return this.view.visibleRanges.map((range) => this.expandRangeByLineMargin(range.from, range.to));
+                }
+
+                const viewport = this.view.viewport;
+                return [this.expandRangeByLineMargin(viewport.from, viewport.to)];
+            }
+
+            private isTargetInVisibleScanRanges(target: BlockRenderTarget, ranges: VisibleScanRange[]) {
+                for (const range of ranges) {
+                    if (target.to >= range.from && target.from <= range.to) {
+                        return true;
+                    }
+                }
+
+                return false;
+            }
+
+            private pumpEmbedRenderQueue() {
+                while (this.runningEmbedRenderCount < MAX_CONCURRENT_EMBED_RENDERS && this.pendingEmbedRenderQueue.length > 0) {
+                    const target = this.pendingEmbedRenderQueue.shift();
+                    if (!target) {
+                        return;
+                    }
+
+                    this.runningEmbedRenderCount += 1;
+                    void this.triggerRender(target).finally(() => {
+                        this.runningEmbedRenderCount = Math.max(this.runningEmbedRenderCount - 1, 0);
+                        this.pumpEmbedRenderQueue();
+                    });
+                }
+            }
+
             private buildListEmbedCard(target: BlockRenderTarget, html: string): HTMLElement {
                 const card = document.createElement("div");
                 card.className = "block-reference-enhancer-widget block-reference-embed-widget markdown-rendered is-list-embed-card block-reference-live-preview-overlay-card";
@@ -538,7 +689,7 @@ export function createAsyncBlockRendererPlugin(plugin: BlockReferenceEnhancer) {
                 card.dataset.blockRefRevealPos = String(target.revealPos ?? target.from);
                 card.dataset.blockRefId = getTargetRefId(target);
                 card.innerHTML = `<div class="block-reference-live-preview-embed-layout is-list-card"><div class="block-reference-embed block-reference-live-preview-embed-card">${html}</div></div>`;
-                this.overlayRoot.appendChild(card);
+                this.ensureOverlayRoot().appendChild(card);
                 return card;
             }
 
@@ -694,15 +845,15 @@ export function createAsyncBlockRendererPlugin(plugin: BlockReferenceEnhancer) {
             }
 
             scanAndRender() {
-                const currentWidgets = this.view.state.field(blockReferenceField);
-                const doc = this.view.state.doc;
-                const docText = doc.sliceString(0, doc.length);
+                this.ensureTargetsUpToDate();
+                const visibleScanRanges = this.getVisibleScanRanges();
                 const selectionFingerprint = this.view.state.selection.ranges
                     .map((range) => `${range.from}:${range.to}`)
                     .join("|");
                 const contentWidth = Math.round(this.view.contentDOM.getBoundingClientRect().width);
                 const scanFingerprint = [
-                    hashString(docText),
+                    this.documentScanVersion,
+                    visibleScanRanges.map((range) => `${range.from}-${range.to}`).join("|"),
                     selectionFingerprint,
                     this.revealedEmbedPos ?? -1,
                     this.view.hasFocus ? 1 : 0,
@@ -715,16 +866,15 @@ export function createAsyncBlockRendererPlugin(plugin: BlockReferenceEnhancer) {
                 }
 
                 this.lastScanFingerprint = scanFingerprint;
-                const rawTargets = collectRenderTargets(docText);
-                this.syncRevealedEmbedTarget(rawTargets);
-                const targets = rawTargets.map((target) => this.measureRenderTarget(target));
+                this.syncRevealedEmbedTarget(this.cachedTargets);
+                const targets = this.cachedTargets
+                    .filter((target) => this.isTargetInVisibleScanRanges(target, visibleScanRanges))
+                    .map((target) => this.measureRenderTarget(target));
                 const activeTargets = new Map<number, BlockRenderTarget>();
-                const activeTargetsByRefId = new Map<string, BlockRenderTarget>();
 
                 for (const target of targets) {
                     if (!this.shouldRevealSource(target)) {
                         activeTargets.set(target.from, target);
-                        activeTargetsByRefId.set(getTargetRefId(target), target);
                     }
                 }
 
@@ -736,41 +886,85 @@ export function createAsyncBlockRendererPlugin(plugin: BlockReferenceEnhancer) {
                     }
                 }
 
-                const existingDecorations = new Set<number>();
                 const removeEffects: Array<ReturnType<typeof removeWidgetEffect.of>> = [];
-                const queuedRemovals = new Set<string>();
-
-                currentWidgets.between(0, doc.length, (from, to, decoration) => {
-                    const refId = decoration.spec.blockRefId as string | undefined;
-                    const signature = decoration.spec.blockRefSignature as string | undefined;
-                    const target = refId ? activeTargetsByRefId.get(refId) : activeTargets.get(from);
-                    const shouldKeep = target !== undefined
-                        && signature === buildTargetSignature(target)
-                        && (refId !== undefined || target.to === to);
-
-                    if (shouldKeep) {
-                        existingDecorations.add(target.from);
-                        return;
-                    }
-
-                    const removalKey = refId ?? `${from}:${to}`;
-                    if (queuedRemovals.has(removalKey)) {
-                        return;
-                    }
-
-                    queuedRemovals.add(removalKey);
-                    removeEffects.push(removeWidgetEffect.of({ from, to, refId }));
-                });
-
-                if (removeEffects.length > 0) {
-                    this.view.dispatch({ effects: removeEffects });
-                }
+                const nextVisibleWidgetStates = new Map<string, VisibleWidgetState>();
 
                 for (const target of activeTargets.values()) {
-                    if (!existingDecorations.has(target.from) && !this.runningRenders.has(target.from)) {
-                        this.triggerRender(target);
-                    }
+                    const refId = getTargetRefId(target);
+                    nextVisibleWidgetStates.set(refId, {
+                        from: target.from,
+                        to: target.to,
+                        signature: buildTargetSignature(target),
+                    });
                 }
+
+                for (const [refId, previousState] of this.visibleWidgetStates.entries()) {
+                    const nextState = nextVisibleWidgetStates.get(refId);
+                    if (nextState && nextState.signature === previousState.signature) {
+                        continue;
+                    }
+
+                    removeEffects.push(removeWidgetEffect.of({
+                        from: previousState.from,
+                        to: previousState.to,
+                        refId,
+                    }));
+                }
+
+                this.pendingEmbedRenderQueue = [];
+                const inlineRenderEffects: Array<ReturnType<typeof setRenderedWidgetEffect.of>> = [];
+                const embedLoadingEffects: Array<ReturnType<typeof addLoadingWidgetEffect.of>> = [];
+                for (const target of activeTargets.values()) {
+                    const refId = getTargetRefId(target);
+                    const previousState = this.visibleWidgetStates.get(refId);
+                    const nextState = nextVisibleWidgetStates.get(refId);
+                    const isUnchanged = previousState !== undefined
+                        && nextState !== undefined
+                        && previousState.signature === nextState.signature;
+
+                    if (isUnchanged || this.runningRenders.has(target.from)) {
+                        continue;
+                    }
+
+                    if (target.mode === "embed") {
+                        this.pendingEmbedRenderQueue.push(target);
+                        embedLoadingEffects.push(addLoadingWidgetEffect.of({
+                            from: target.from,
+                            to: target.to,
+                            uuid: target.uuid,
+                            mode: "embed",
+                            interaction: this.createEmbedInteraction(target, buildTargetSignature(target)),
+                        }));
+                        continue;
+                    }
+
+                    const inlineInfo = plugin.getInlineReferenceInfo(target.uuid);
+                    inlineRenderEffects.push(setRenderedWidgetEffect.of({
+                        from: target.from,
+                        to: target.to,
+                        content: inlineInfo.text ?? "[missing block]",
+                        mode: "inline",
+                        interaction: {
+                            from: target.from,
+                            to: target.to,
+                            revealPos: target.from,
+                            stale: inlineInfo.stale,
+                        },
+                    }));
+                }
+
+                const immediateEffects = [
+                    ...removeEffects,
+                    ...inlineRenderEffects,
+                    ...embedLoadingEffects,
+                ];
+
+                if (immediateEffects.length > 0) {
+                    this.view.dispatch({ effects: immediateEffects });
+                }
+
+                this.visibleWidgetStates = nextVisibleWidgetStates;
+                this.pumpEmbedRenderQueue();
             }
 
             async triggerRender(target: BlockRenderTarget) {
@@ -780,18 +974,6 @@ export function createAsyncBlockRendererPlugin(plugin: BlockReferenceEnhancer) {
                 this.runningRenders.set(target.from, { controller, signature: renderSignature });
 
                 try {
-                    this.view.dispatch({
-                        effects: addLoadingWidgetEffect.of({
-                            from: target.from,
-                            to: target.to,
-                            uuid: target.uuid,
-                            mode: target.mode,
-                            interaction: target.mode === "embed"
-                                ? this.createEmbedInteraction(target, widgetSignature)
-                                : undefined,
-                        }),
-                    });
-
                     if (target.mode === "inline") {
                         const inlineInfo = plugin.getInlineReferenceInfo(target.uuid);
                         const summary = inlineInfo.text ?? "[missing block]";
