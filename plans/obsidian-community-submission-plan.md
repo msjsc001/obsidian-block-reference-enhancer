@@ -4,6 +4,18 @@
 
 Prepare `Block Reference Enhancer` for its first submission to the official Obsidian community plugin directory without regressing the current UUID block reference and block embed features.
 
+## Current State
+
+- Repository default branch is `main`.
+- Release candidate commit on the plugin repository is `8bfd6a0`.
+- Git tag `1.1.1` has already been pushed to `origin`.
+- Release build files have already been generated locally:
+  - `main.js`
+  - `manifest.json`
+  - `styles.css`
+- There is currently no GitHub CLI or GitHub API token available in this environment.
+- There is currently no `msjsc001/obsidian-releases` fork yet, so the final community-directory PR cannot be pushed automatically from here.
+
 ## Current Product Decisions
 
 - Display name stays `Block Reference Enhancer`.
@@ -67,6 +79,11 @@ Attach these exact files as release assets:
 
 The release assets are what Obsidian installs. The root `manifest.json` and `README.md` are used for directory metadata and details.
 
+Current status:
+
+- The tag already exists on GitHub: `1.1.1`
+- The remaining release action is to create the GitHub Release page for that tag and upload the three assets
+
 ## Community Directory Submission Steps
 
 Current practical path:
@@ -87,6 +104,12 @@ Current practical path:
 3. Open a PR against `obsidianmd/obsidian-releases`.
 4. Use the official plugin PR template.
 5. Keep `Allow edits from maintainers` enabled.
+
+Current status:
+
+- The exact JSON entry is stored in `plans/community-plugin-entry.block-reference-enhancer.json`.
+- A ready-to-paste PR body is stored in `plans/obsidian-community-submission-pr-body-1.1.1.md`.
+- The missing prerequisite is the fork itself.
 
 ## PR Checklist Draft
 
@@ -150,3 +173,11 @@ These are intentionally not part of the first community submission:
 - a built-in search system for expanded block content
 - additional settings UI
 - large architectural refactors unrelated to review compliance
+
+## Remaining Manual Actions
+
+1. Create a GitHub Release for tag `1.1.1` on `msjsc001/obsidian-block-reference-enhancer`.
+2. Upload `main.js`, `manifest.json`, and `styles.css` as individual release assets.
+3. Create the fork `msjsc001/obsidian-releases` on GitHub.
+4. Add the JSON entry from `plans/community-plugin-entry.block-reference-enhancer.json` to `community-plugins.json` in the fork.
+5. Open the PR against `obsidianmd/obsidian-releases` using the body from `plans/obsidian-community-submission-pr-body-1.1.1.md`.
