@@ -1,4 +1,5 @@
 import { WidgetType } from "@codemirror/view";
+import { replaceChildrenFromHtml } from "src/utils/html";
 
 export type BlockRenderMode = "inline" | "embed";
 export interface BlockWidgetInteraction {
@@ -119,7 +120,7 @@ export class BlockReferenceWidget extends WidgetType {
                 embed.setText("Loading block...");
                 card.addClass("is-loading");
             } else if (this.state === "rendered" && this.content) {
-                embed.innerHTML = this.content;
+                replaceChildrenFromHtml(embed, this.content);
             } else {
                 embed.setText("Error: Invalid state");
                 card.addClass("is-error");
@@ -139,7 +140,7 @@ export class BlockReferenceWidget extends WidgetType {
             card.addClass("is-loading");
         } else if (this.state === "rendered" && this.content) {
             if (this.mode === "embed") {
-                card.innerHTML = this.content;
+                replaceChildrenFromHtml(card, this.content);
             } else {
                 card.setText(this.content);
             }

@@ -4,13 +4,19 @@ import { BlockSuggest } from './editor/BlockSuggest';
 import { blockReferenceField } from './editor/BlockReferenceField';
 import { createAsyncBlockRendererPlugin } from './editor/AsyncBlockRendererPlugin';
 import { createSourceReferenceBadgePlugin } from './editor/SourceReferenceBadgePlugin';
-import { BlockCache, BlockReferenceLocation, IndexBuildStats, IndexProgress, IndexStatus } from './types';
+import { BlockCache, BlockReferenceLocation, IndexBuildStats, IndexProgress, IndexStatus, LegacyPersistedBlockCacheEntry, PersistedIndexCacheV3 } from './types';
 import { StaleBlockReviewModal } from './ui/StaleBlockReviewModal';
 import { createSourceReferenceBadgeElement } from './ui/SourceReferenceBadgeElement';
 import { SourceReferencePopover } from './ui/SourceReferencePopover';
+import { serializeChildrenToHtml } from './utils/html';
 
 interface BlockReferenceEnhancerSettings {
 	// 未来可能会在这里添加设置
+}
+
+interface BlockReferenceEnhancerPersistedData {
+	settings?: Partial<BlockReferenceEnhancerSettings>;
+	indexCache?: PersistedIndexCacheV3 | LegacyPersistedBlockCacheEntry[] | null;
 }
 
 const DEFAULT_SETTINGS: BlockReferenceEnhancerSettings = {
@@ -93,28 +99,39 @@ export default class BlockReferenceEnhancer extends Plugin {
 	private lastKnownIndexStats: IndexBuildStats | null = null;
 	private startupFullRebuildPending = false;
 	private sourceReferencePopover: SourceReferencePopover | null = null;
+	private persistedData: BlockReferenceEnhancerPersistedData = {};
 
 	async onload() {
 		await this.loadSettings();
 
-		this.indexService = new IndexService(this.app, this.manifest.dir!);
+		this.indexService = new IndexService(this.app, {
+			load: async () => this.persistedData.indexCache ?? null,
+			save: async (cache) => {
+				this.persistedData = {
+					...this.persistedData,
+					settings: this.settings,
+					indexCache: cache,
+				};
+				await this.saveData(this.persistedData);
+			},
+		});
 		this.sourceReferencePopover = new SourceReferencePopover(this);
 		this.statusBarEl = this.addStatusBarItem();
 		this.setIndexStatusMessage('Block index: loading cache...');
 
 		this.addCommand({
-			id: 'rebuild-logseq-block-index',
+			id: 'rebuild-block-reference-index',
 			name: 'Rebuild block reference index',
-			callback: async () => {
-				await this.rebuildBlockReferenceIndex();
+			callback: () => {
+				void this.rebuildBlockReferenceIndex();
 			},
 		});
 
 		this.addCommand({
-			id: 'copy-logseq-block-reference',
+			id: 'copy-current-block-reference',
 			name: 'Copy current block reference',
 			editorCallback: (editor: Editor, view: MarkdownView) => {
-				this.handleCopyBlockReference(editor, view);
+				void this.handleCopyBlockReference(editor, view);
 			},
 		});
 
@@ -162,33 +179,41 @@ export default class BlockReferenceEnhancer extends Plugin {
 			);
 		}, true);
 
-		this.app.workspace.onLayoutReady(async () => {
-			this.registerEvent(this.indexService.on('index-updated', () => {
-				this.referencePreviewCache.clear();
-				void this.sourceReferencePopover?.refreshIfOpen();
-				this.refreshOpenMarkdownViews();
-			}));
-
-			await this.indexService.initialize({
-				onProgress: (progress) => {
-					this.updateIndexProgress(progress);
-				},
-				onStatus: (status) => {
-					this.handleIndexStatus(status);
-				},
-			});
-
-			this.registerMarkdownPostProcessor(this.readingModeRenderer.bind(this));
-
-			const asyncPlugin = createAsyncBlockRendererPlugin(this);
-			const sourceReferenceBadgePlugin = createSourceReferenceBadgePlugin(this);
-			this.registerEditorExtension([blockReferenceField, asyncPlugin, sourceReferenceBadgePlugin]);
-
-			this.registerEditorSuggest(new BlockSuggest(this.app, this.indexService));
-
-			this.setupFileEvents();
-			this.refreshOpenMarkdownViews();
+		this.app.workspace.onLayoutReady(() => {
+			void this.handleLayoutReady();
 		});
+	}
+
+	onunload() {
+		this.sourceReferencePopover?.destroy();
+	}
+
+	private async handleLayoutReady() {
+		this.registerEvent(this.indexService.on('index-updated', () => {
+			this.referencePreviewCache.clear();
+			void this.sourceReferencePopover?.refreshIfOpen();
+			this.refreshOpenMarkdownViews();
+		}));
+
+		await this.indexService.initialize({
+			onProgress: (progress) => {
+				this.updateIndexProgress(progress);
+			},
+			onStatus: (status) => {
+				this.handleIndexStatus(status);
+			},
+		});
+
+		this.registerMarkdownPostProcessor(this.readingModeRenderer.bind(this));
+
+		const asyncPlugin = createAsyncBlockRendererPlugin(this);
+		const sourceReferenceBadgePlugin = createSourceReferenceBadgePlugin(this);
+		this.registerEditorExtension([blockReferenceField, asyncPlugin, sourceReferenceBadgePlugin]);
+
+		this.registerEditorSuggest(new BlockSuggest(this.app, this.indexService));
+
+		this.setupFileEvents();
+		this.refreshOpenMarkdownViews();
 	}
 
 	setupFileEvents() {
@@ -217,17 +242,30 @@ export default class BlockReferenceEnhancer extends Plugin {
 		}));
 	}
 
-	onunload() {
-		this.sourceReferencePopover?.destroy();
-		console.log('Unloading Block Reference Enhancer plugin.');
-	}
-
 	async loadSettings() {
-		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+		const rawData = await this.loadData();
+		if (this.isPersistedData(rawData)) {
+			this.persistedData = rawData;
+		} else {
+			this.persistedData = {
+				settings: rawData as Partial<BlockReferenceEnhancerSettings> | undefined,
+				indexCache: null,
+			};
+		}
+
+		this.settings = Object.assign({}, DEFAULT_SETTINGS, this.persistedData.settings ?? {});
 	}
 
 	async saveSettings() {
-		await this.saveData(this.settings);
+		this.persistedData = {
+			...this.persistedData,
+			settings: this.settings,
+		};
+		await this.saveData(this.persistedData);
+	}
+
+	private isPersistedData(value: unknown): value is BlockReferenceEnhancerPersistedData {
+		return !!value && typeof value === 'object' && ('settings' in value || 'indexCache' in value);
 	}
 
 	async handleCopyBlockReference(editor: Editor, view: MarkdownView) {
@@ -267,7 +305,12 @@ export default class BlockReferenceEnhancer extends Plugin {
 			});
 		}
 
-		navigator.clipboard.writeText(`((${blockId}))`);
+		if (!navigator.clipboard?.writeText) {
+			new Notice('Clipboard API unavailable on this platform.');
+			return;
+		}
+
+		await navigator.clipboard.writeText(`((${blockId}))`);
 		new Notice('Block reference copied to clipboard!');
 	}
 
@@ -319,7 +362,7 @@ export default class BlockReferenceEnhancer extends Plugin {
 	async buildEmbedHtml(uuid: string, sourcePath: string, component: Component): Promise<string> {
 		const host = document.createElement('div');
 		await this.populateEmbedContainer(host, uuid, sourcePath, component, new Set<string>());
-		return host.innerHTML;
+		return serializeChildrenToHtml(host);
 	}
 
 	attachReadingModeRenderQueue(element: HTMLElement): HTMLElement | null {

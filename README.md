@@ -53,17 +53,20 @@ This is designed around UUID-based outline notes and common Logseq-style block s
 
 ## Manual Install
 
-1. Open your vault folder.
-2. Go to `.obsidian/plugins/`.
-3. Create a folder named `logseq-block-ref-enhancer`.
+Install from the latest GitHub release assets rather than from the source tree.
+
+1. Download `main.js`, `manifest.json`, and `styles.css` from the latest GitHub release.
+2. Open your vault folder.
+3. Go to `.obsidian/plugins/`.
+4. Create a folder named `logseq-block-ref-enhancer`.
    The plugin ID still keeps this legacy value for installation and local data compatibility.
-4. Copy these files into it:
+5. Copy these files into it:
    - `main.js`
    - `manifest.json`
    - `styles.css`
-5. Open Obsidian.
-6. Go to `Settings` -> `Community plugins`.
-7. Enable `Block Reference Enhancer`.
+6. Open Obsidian.
+7. Go to `Settings` -> `Community plugins`.
+8. Enable `Block Reference Enhancer`.
 
 After the plugin is enabled:
 - The first full index build shows progress in the status bar.
@@ -212,6 +215,13 @@ Secondary recommendations:
 - `Tag Wrangler`
 - `Toggle Readable line length`
 
+## Privacy and Runtime Behavior
+
+- The plugin runs locally inside Obsidian.
+- It does not send your notes, UUIDs, or index data over the network.
+- It does not include telemetry, ads, or account-gated behavior.
+- The block index cache is stored through Obsidian's plugin data storage.
+
 ## Development
 
 ```bash
@@ -223,6 +233,11 @@ Build artifacts:
 - `main.js`
 - `manifest.json`
 - `styles.css`
+
+Release notes:
+- `npm run build` produces the production `main.js`.
+- Community-plugin releases should use an exact numeric GitHub tag such as `1.1.0`, without a `v` prefix.
+- Each GitHub release should attach `main.js`, `manifest.json`, and `styles.css`.
 
 ## Known Limitations
 

@@ -8,6 +8,7 @@ import {
 } from "./BlockReferenceField";
 import { BlockRenderMode } from "./BlockReferenceWidget";
 import BlockReferenceEnhancer from "src/main";
+import { replaceChildrenFromHtml } from "src/utils/html";
 
 interface BlockRenderTarget {
     from: number;
@@ -688,7 +689,15 @@ export function createAsyncBlockRendererPlugin(plugin: BlockReferenceEnhancer) {
                 card.dataset.blockRefTo = String(target.to);
                 card.dataset.blockRefRevealPos = String(target.revealPos ?? target.from);
                 card.dataset.blockRefId = getTargetRefId(target);
-                card.innerHTML = `<div class="block-reference-live-preview-embed-layout is-list-card"><div class="block-reference-embed block-reference-live-preview-embed-card">${html}</div></div>`;
+                const layout = document.createElement("div");
+                layout.className = "block-reference-live-preview-embed-layout is-list-card";
+
+                const embed = document.createElement("div");
+                embed.className = "block-reference-embed block-reference-live-preview-embed-card";
+                replaceChildrenFromHtml(embed, html);
+
+                layout.appendChild(embed);
+                card.appendChild(layout);
                 this.ensureOverlayRoot().appendChild(card);
                 return card;
             }
@@ -721,7 +730,16 @@ export function createAsyncBlockRendererPlugin(plugin: BlockReferenceEnhancer) {
                 }
 
                 if (existing.state.html !== state.html) {
-                    existing.card.innerHTML = `<div class="block-reference-live-preview-embed-layout is-list-card"><div class="block-reference-embed block-reference-live-preview-embed-card">${state.html}</div></div>`;
+                    existing.card.empty();
+                    const layout = document.createElement("div");
+                    layout.className = "block-reference-live-preview-embed-layout is-list-card";
+
+                    const embed = document.createElement("div");
+                    embed.className = "block-reference-embed block-reference-live-preview-embed-card";
+                    replaceChildrenFromHtml(embed, state.html);
+
+                    layout.appendChild(embed);
+                    existing.card.appendChild(layout);
                     existing.state = state;
                 }
 

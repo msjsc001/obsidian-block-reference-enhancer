@@ -55,17 +55,20 @@
 
 适合普通用户的手动安装方式：
 
-1. 打开你的 Obsidian 库目录。
-2. 进入 `.obsidian/plugins/`。
-3. 新建一个文件夹，名字使用插件 ID：`logseq-block-ref-enhancer`。
+建议从 GitHub 最新 Release 下载附件安装，而不是直接从源码目录拷文件。
+
+1. 从最新 GitHub Release 下载 `main.js`、`manifest.json`、`styles.css`。
+2. 打开你的 Obsidian 库目录。
+3. 进入 `.obsidian/plugins/`。
+4. 新建一个文件夹，名字使用插件 ID：`logseq-block-ref-enhancer`。
    当前插件 ID 仍保留旧值以兼容现有安装和本地数据。
-4. 将这些文件复制进去：
+5. 将这些文件复制进去：
    - `main.js`
    - `manifest.json`
    - `styles.css`
-5. 回到 Obsidian。
-6. 打开“设置” -> “第三方插件”。
-7. 启用 `Block Reference Enhancer`。
+6. 回到 Obsidian。
+7. 打开“设置” -> “第三方插件”。
+8. 启用 `Block Reference Enhancer`。
 
 插件启用后：
 - 首次完整建索引时会在状态栏显示进度。
@@ -214,6 +217,13 @@
 - `Tag Wrangler`
 - `Toggle Readable line length`
 
+## 隐私与运行方式
+
+- 插件完全在本地 Obsidian 环境内运行。
+- 不会通过网络发送你的笔记、UUID 或索引数据。
+- 不包含遥测、广告或账号门槛。
+- 块索引缓存通过 Obsidian 的插件数据存储保存。
+
 ## 开发
 
 ```bash
@@ -225,6 +235,11 @@ npm run build
 - `main.js`
 - `manifest.json`
 - `styles.css`
+
+发布说明：
+- `npm run build` 会产出用于发布的生产版 `main.js`。
+- 面向 Obsidian 社区插件目录发布时，GitHub tag 建议直接使用精确版本号，例如 `1.1.0`，不要加 `v` 前缀。
+- 每个 GitHub Release 都应上传 `main.js`、`manifest.json`、`styles.css`。
 
 ## 已知情况
 

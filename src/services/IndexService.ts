@@ -28,6 +28,11 @@ interface InitializeCallbacks {
     onStatus?: (status: IndexStatus) => void;
 }
 
+interface IndexCacheStore {
+    load: () => Promise<PersistedIndexCacheV3 | LegacyPersistedBlockCacheEntry[] | null>;
+    save: (cache: PersistedIndexCacheV3) => Promise<void>;
+}
+
 interface ReconcileResult {
     didChange: boolean;
     changedFiles: number;
@@ -41,7 +46,7 @@ interface ReconcileResult {
 export class IndexService extends Events {
     private readonly app: App;
     private readonly blockParser: BlockParser;
-    private readonly CACHE_FILE_PATH: string;
+    private readonly cacheStore: IndexCacheStore;
     private readonly debouncedSave: () => void;
     private readonly recoverPagePath = normalizePath(RECOVERY_PAGE_PATH);
 
@@ -53,11 +58,11 @@ export class IndexService extends Events {
     private indexRevision = 0;
     private operationQueue: Promise<unknown> = Promise.resolve();
 
-    constructor(app: App, pluginDataPath: string) {
+    constructor(app: App, cacheStore: IndexCacheStore) {
         super();
         this.app = app;
         this.blockParser = new BlockParser();
-        this.CACHE_FILE_PATH = `${pluginDataPath}/block-cache.json`;
+        this.cacheStore = cacheStore;
         this.debouncedSave = debounce(() => this.saveIndexToCache(), 1000, true);
     }
 
@@ -688,12 +693,10 @@ export class IndexService extends Events {
 
     private async loadIndexFromCache(): Promise<boolean> {
         try {
-            if (!await this.app.vault.adapter.exists(this.CACHE_FILE_PATH)) {
+            const parsed = await this.cacheStore.load();
+            if (!parsed) {
                 return false;
             }
-
-            const data = await this.app.vault.adapter.read(this.CACHE_FILE_PATH);
-            const parsed = JSON.parse(data) as PersistedIndexCacheV3 | LegacyPersistedBlockCacheEntry[];
 
             if (Array.isArray(parsed)) {
                 this.loadLegacyCache(parsed);
@@ -906,7 +909,7 @@ export class IndexService extends Events {
                     [...this.sourceBlocksByFile.entries()].map(([path, blocks]) => [path, blocks.map((block) => ({ ...block }))])
                 ),
             };
-            await this.app.vault.adapter.write(this.CACHE_FILE_PATH, JSON.stringify(persisted));
+            await this.cacheStore.save(persisted);
         } catch (error) {
             console.error('Error saving index to cache:', error);
         }
@@ -936,7 +939,8 @@ export class IndexService extends Events {
 
     private async ensureRecoveryFolderExists() {
         const folderPath = normalizePath('pages');
-        if (await this.app.vault.adapter.exists(folderPath)) {
+        const existing = this.app.vault.getAbstractFileByPath(folderPath);
+        if (existing) {
             return;
         }
 
