@@ -41,6 +41,16 @@ The current release is best understood as a viewer and renderer:
 - If the same UUID exists as an active source block in multiple files, each source location shows the same reference-count badge.
 - Clicking the badge opens a reference panel that emphasizes file name, line number, preview text, and full path.
 
+## Parsing Rules
+
+The plugin is intentionally strict about what counts as a source block.
+
+A block is indexed as a source block when:
+- the source line starts with an outline list marker such as `- `
+- the block has an indented property line containing `id:: uuid`
+
+This is designed around UUID-based outline notes and common Logseq-style block structure. If the syntax is looser or uses a different block shape, the plugin may skip it on purpose.
+
 ## Manual Install
 
 1. Open your vault folder.
@@ -139,7 +149,11 @@ When a source block is referenced by `((uuid))` or `{{embed ((uuid))}}`:
 - The popover shows file name, line number, reference type, preview text, and full path.
 - Clicking a result jumps to the referenced location.
 
+This works as a source-block backlink count entry point, not just a visual counter.
+
 If the same file references the source block multiple times, the badge counts each reference occurrence.
+
+If the same UUID exists as an active source block in multiple files, each source location shows the badge. Reusing the same UUID across different source blocks is still not recommended.
 
 ### Rebuild block index
 
@@ -176,6 +190,27 @@ Default recovery page:
 `pages/Block Recovery.md`
 
 Recovery is intentionally routed to the recovery page instead of trying to reinsert the block at its old file path and line number. That keeps the default behavior predictable in large vaults.
+
+## Troubleshooting
+
+If you see `[missing block]` or `Missing block`:
+- check whether the status bar has already reached `Block index: ready`
+- run `Rebuild block reference index`
+- check whether the source block follows the expected `- ` plus indented `id:: uuid` shape
+- use `Review missing source blocks` if the source block was removed but references still exist
+
+## Recommended Companion Plugins
+
+Primary recommendations:
+- `Outliner`
+- `Zoom`
+
+Secondary recommendations:
+- `Better Search Views`
+- `PDF++`
+- `Recent Files`
+- `Tag Wrangler`
+- `Toggle Readable line length`
 
 ## Development
 
