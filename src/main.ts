@@ -3,19 +3,21 @@ import { IndexService } from './services/IndexService';
 import { BlockSuggest } from './editor/BlockSuggest';
 import { blockReferenceField } from './editor/BlockReferenceField';
 import { createAsyncBlockRendererPlugin } from './editor/AsyncBlockRendererPlugin';
+import { IndexBuildStats, IndexProgress, IndexStatus } from './types';
+import { StaleBlockReviewModal } from './ui/StaleBlockReviewModal';
 
-interface LogseqBlockRefEnhancerSettings {
+interface BlockReferenceEnhancerSettings {
 	// 未来可能会在这里添加设置
 }
 
-const DEFAULT_SETTINGS: LogseqBlockRefEnhancerSettings = {
+const DEFAULT_SETTINGS: BlockReferenceEnhancerSettings = {
 	// 默认值
 };
 
 const MAX_INLINE_SUMMARY_LENGTH = 60;
 const STANDALONE_EMBED_REGEX = /^\s*\{\{embed\s+\(\(([A-Za-z0-9_-]{36,})\)\)\s*\}\}\s*$/;
-const MANUAL_RENDER_SCOPE_ATTR = 'data-logseq-manual-render';
-const MANAGED_NODE_ATTR = 'data-logseq-managed-node';
+const MANUAL_RENDER_SCOPE_ATTR = 'data-block-ref-manual-render';
+const MANAGED_NODE_ATTR = 'data-block-ref-managed-node';
 const EMBED_PLACEHOLDER_LINE_HEIGHT_PX = 22;
 const EMBED_PLACEHOLDER_BASE_HEIGHT_PX = 24;
 const EMBED_PLACEHOLDER_MIN_LINES = 2;
@@ -57,7 +59,7 @@ class ReferencePostProcessChild extends MarkdownRenderChild {
 
 	constructor(
 		containerEl: HTMLElement,
-		private readonly plugin: LogseqBlockRefEnhancer,
+		private readonly plugin: BlockReferenceEnhancer,
 		private readonly sourcePath: string
 	) {
 		super(containerEl);
@@ -73,34 +75,58 @@ class ReferencePostProcessChild extends MarkdownRenderChild {
 	}
 }
 
-export default class LogseqBlockRefEnhancer extends Plugin {
-	settings: LogseqBlockRefEnhancerSettings;
+export default class BlockReferenceEnhancer extends Plugin {
+	settings: BlockReferenceEnhancerSettings;
 	indexService: IndexService;
 	private readonly readingModeRenderQueues = new Map<HTMLElement, ReadingModeRenderQueue>();
+	private statusBarEl: HTMLElement | null = null;
+	private lastKnownIndexStats: IndexBuildStats | null = null;
+	private startupFullRebuildPending = false;
 
 	async onload() {
 		await this.loadSettings();
 
 		this.indexService = new IndexService(this.app, this.manifest.dir!);
+		this.statusBarEl = this.addStatusBarItem();
+		this.setIndexStatusMessage('Block index: loading cache...');
 
 		this.addCommand({
 			id: 'rebuild-logseq-block-index',
 			name: 'Rebuild block reference index',
-			callback: () => {
-				this.indexService.buildIndex();
+			callback: async () => {
+				await this.rebuildBlockReferenceIndex();
 			},
 		});
 
 		this.addCommand({
 			id: 'copy-logseq-block-reference',
-			name: 'Copy current block\'s Logseq reference',
+			name: 'Copy current block reference',
 			editorCallback: (editor: Editor, view: MarkdownView) => {
 				this.handleCopyBlockReference(editor, view);
 			},
 		});
 
+		this.addCommand({
+			id: 'review-missing-source-blocks',
+			name: 'Review missing source blocks',
+			callback: () => {
+				this.openStaleBlockReview();
+			},
+		});
+
 		this.app.workspace.onLayoutReady(async () => {
-			await this.indexService.initialize();
+			this.registerEvent(this.indexService.on('index-updated', () => {
+				this.refreshOpenMarkdownViews();
+			}));
+
+			await this.indexService.initialize({
+				onProgress: (progress) => {
+					this.updateIndexProgress(progress);
+				},
+				onStatus: (status) => {
+					this.handleIndexStatus(status);
+				},
+			});
 
 			this.registerMarkdownPostProcessor(this.readingModeRenderer.bind(this));
 
@@ -110,37 +136,38 @@ export default class LogseqBlockRefEnhancer extends Plugin {
 			this.registerEditorSuggest(new BlockSuggest(this.app, this.indexService));
 
 			this.setupFileEvents();
+			this.refreshOpenMarkdownViews();
 		});
 	}
 
 	setupFileEvents() {
 		this.registerEvent(this.app.vault.on('create', (file) => {
 			if (file instanceof TFile && file.extension === 'md') {
-				this.indexService.processFileChange(file);
+				void this.indexService.processFileChange(file);
 			}
 		}));
 
 		this.registerEvent(this.app.vault.on('modify', (file) => {
 			if (file instanceof TFile && file.extension === 'md') {
-				this.indexService.processFileChange(file);
+				void this.indexService.processFileChange(file);
 			}
 		}));
 
 		this.registerEvent(this.app.vault.on('delete', (file) => {
 			if (file instanceof TFile && file.extension === 'md') {
-				this.indexService.processFileDelete(file.path);
+				void this.indexService.processFileDelete(file.path);
 			}
 		}));
 
 		this.registerEvent(this.app.vault.on('rename', (file, oldPath) => {
 			if (file instanceof TFile && file.extension === 'md') {
-				this.indexService.processFileRename(oldPath, file.path);
+				void this.indexService.processFileRename(oldPath, file.path);
 			}
 		}));
 	}
 
 	onunload() {
-		console.log('Unloading Logseq Block Ref Enhancer plugin.');
+		console.log('Unloading Block Reference Enhancer plugin.');
 	}
 
 	async loadSettings() {
@@ -161,7 +188,7 @@ export default class LogseqBlockRefEnhancer extends Plugin {
 
 		const blockMatch = lineContent.match(/^\s*-\s(.+)/);
 		if (!blockMatch) {
-			new Notice('This line is not a valid Logseq block.');
+			new Notice('This line is not a valid source block.');
 			return;
 		}
 
@@ -183,6 +210,7 @@ export default class LogseqBlockRefEnhancer extends Plugin {
 				rawContent: blockMatch[1],
 				childrenMarkdown: '',
 				startLine: line,
+				endLine: line,
 				childrenIDs: [],
 			});
 		}
@@ -192,17 +220,21 @@ export default class LogseqBlockRefEnhancer extends Plugin {
 	}
 
 	getInlineReferenceText(uuid: string): string | null {
-		return this.getInlineReferenceTextInternal(uuid, new Set<string>());
+		return this.getInlineReferenceInfo(uuid).text;
 	}
 
-	private getInlineReferenceTextInternal(uuid: string, visited: Set<string>): string | null {
+	getInlineReferenceInfo(uuid: string): { text: string | null; stale: boolean } {
+		return this.getInlineReferenceInfoInternal(uuid, new Set<string>());
+	}
+
+	private getInlineReferenceInfoInternal(uuid: string, visited: Set<string>): { text: string | null; stale: boolean } {
 		if (visited.has(uuid)) {
-			return '[cyclic block]';
+			return { text: '[cyclic block]', stale: false };
 		}
 
 		const block = this.indexService.getBlock(uuid);
 		if (!block) {
-			return null;
+			return { text: null, stale: false };
 		}
 
 		const nextVisited = new Set(visited);
@@ -210,7 +242,7 @@ export default class LogseqBlockRefEnhancer extends Plugin {
 
 		const firstLine = block.rawContent.split(/\r?\n/, 1)[0] ?? '';
 		const expandedLine = firstLine.replace(/(?:\(\(|\uFF08\uFF08)([A-Za-z0-9_-]{36,})(?:\)\)|\uFF09\uFF09)/g, (_match, nestedUuid: string) => {
-			return this.getInlineReferenceTextInternal(nestedUuid, nextVisited) ?? '[missing block]';
+			return this.getInlineReferenceInfoInternal(nestedUuid, nextVisited).text ?? '[missing block]';
 		});
 
 		const plainText = expandedLine
@@ -224,9 +256,12 @@ export default class LogseqBlockRefEnhancer extends Plugin {
 			.trim();
 
 		const summary = plainText || '[empty block]';
-		return summary.length > MAX_INLINE_SUMMARY_LENGTH
-			? `${summary.slice(0, MAX_INLINE_SUMMARY_LENGTH).trimEnd()}…`
-			: summary;
+		return {
+			text: summary.length > MAX_INLINE_SUMMARY_LENGTH
+				? `${summary.slice(0, MAX_INLINE_SUMMARY_LENGTH).trimEnd()}…`
+				: summary,
+			stale: block.status === 'stale',
+		};
 	}
 
 	async buildEmbedHtml(uuid: string, sourcePath: string, component: Component): Promise<string> {
@@ -543,9 +578,13 @@ export default class LogseqBlockRefEnhancer extends Plugin {
 		element.setAttribute(MANUAL_RENDER_SCOPE_ATTR, 'true');
 	}
 
-	private createInlineReferenceElement(summary: string): HTMLSpanElement {
+	private createInlineReferenceElement(summary: string, stale: boolean): HTMLSpanElement {
 		const inlineRef = document.createElement('span');
-		inlineRef.addClass('logseq-inline-block-ref');
+		inlineRef.addClass('block-reference-inline-ref');
+		if (stale) {
+			inlineRef.addClass('is-stale');
+			inlineRef.setAttribute('title', 'Source block missing. Showing cached content.');
+		}
 		inlineRef.setAttribute(MANAGED_NODE_ATTR, 'true');
 		inlineRef.setText(summary);
 		return inlineRef;
@@ -576,27 +615,28 @@ export default class LogseqBlockRefEnhancer extends Plugin {
 
 	private prepareEmbedContainer(container: HTMLElement, uuid: string) {
 		container.empty();
-		container.removeClass('logseq-block-ref-enhancer-error');
-		container.addClass('logseq-block-embed', 'is-loading');
+		container.removeClass('block-reference-enhancer-error');
+		container.removeClass('is-stale');
+		container.addClass('block-reference-embed', 'is-loading');
 		container.setAttribute(MANAGED_NODE_ATTR, 'true');
 		this.markManualRenderScope(container);
 
 		const placeholderHeight = this.estimateEmbedPlaceholderHeight(uuid);
 		if (placeholderHeight !== null) {
-			container.style.setProperty('--logseq-embed-placeholder-height', `${placeholderHeight}px`);
+			container.style.setProperty('--block-reference-embed-placeholder-height', `${placeholderHeight}px`);
 		} else {
-			container.style.removeProperty('--logseq-embed-placeholder-height');
+			container.style.removeProperty('--block-reference-embed-placeholder-height');
 		}
 
 		const placeholder = document.createElement('div');
-		placeholder.addClass('logseq-block-embed-placeholder');
+		placeholder.addClass('block-reference-embed-placeholder');
 		container.appendChild(placeholder);
 	}
 
 	private finalizeEmbedContainer(container: HTMLElement, contentNodes: Node[]) {
 		container.replaceChildren(...contentNodes);
 		container.removeClass('is-loading');
-		container.style.removeProperty('--logseq-embed-placeholder-height');
+		container.style.removeProperty('--block-reference-embed-placeholder-height');
 	}
 
 	private shouldSkipTextNode(node: Text, root: HTMLElement): boolean {
@@ -641,7 +681,7 @@ export default class LogseqBlockRefEnhancer extends Plugin {
 		if (visitedEmbeds.has(uuid)) {
 			container.empty();
 			container.removeClass('is-loading');
-			container.addClass('logseq-block-ref-enhancer-error');
+			container.addClass('block-reference-enhancer-error');
 			container.setText('Cyclic embed');
 			return;
 		}
@@ -650,7 +690,7 @@ export default class LogseqBlockRefEnhancer extends Plugin {
 		if (!block) {
 			container.empty();
 			container.removeClass('is-loading');
-			container.addClass('logseq-block-ref-enhancer-error');
+			container.addClass('block-reference-enhancer-error');
 			container.setText('Missing block');
 			return;
 		}
@@ -658,16 +698,24 @@ export default class LogseqBlockRefEnhancer extends Plugin {
 		const nextVisitedEmbeds = new Set(visitedEmbeds);
 		nextVisitedEmbeds.add(uuid);
 
-		const rootContainer = document.createElement('div');
-		rootContainer.addClass('logseq-block-embed-root');
-		await this.renderMarkdownAndProcess(rootContainer, block.rawContent, sourcePath, component, nextVisitedEmbeds);
+		const contentNodes: Node[] = [];
+		if (block.status === 'stale') {
+			container.addClass('is-stale');
+			const warning = document.createElement('div');
+			warning.addClass('block-reference-enhancer-warning');
+			warning.setText('Source block missing. Showing cached content.');
+			contentNodes.push(warning);
+		}
 
-		const contentNodes: Node[] = [rootContainer];
+		const rootContainer = document.createElement('div');
+		rootContainer.addClass('block-reference-embed-root');
+		await this.renderMarkdownAndProcess(rootContainer, block.rawContent, sourcePath, component, nextVisitedEmbeds);
+		contentNodes.push(rootContainer);
 
 		const childMarkdown = block.childrenMarkdown?.trim();
 		if (childMarkdown) {
 			const childrenContainer = document.createElement('div');
-			childrenContainer.addClass('logseq-block-embed-children');
+			childrenContainer.addClass('block-reference-embed-children');
 			await this.renderMarkdownAndProcess(childrenContainer, childMarkdown, sourcePath, component, nextVisitedEmbeds);
 			contentNodes.push(childrenContainer);
 		}
@@ -748,8 +796,9 @@ export default class LogseqBlockRefEnhancer extends Plugin {
 				if (embedUuid) {
 					fragment.appendChild(document.createTextNode(placeholder));
 				} else {
-					const summary = this.getInlineReferenceText(inlineUuid) ?? '[missing block]';
-					fragment.appendChild(this.createInlineReferenceElement(summary));
+					const inlineInfo = this.getInlineReferenceInfo(inlineUuid);
+					const summary = inlineInfo.text ?? '[missing block]';
+					fragment.appendChild(this.createInlineReferenceElement(summary, inlineInfo.stale));
 					replacedInline = true;
 				}
 
@@ -777,5 +826,134 @@ export default class LogseqBlockRefEnhancer extends Plugin {
 		}
 
 		context.addChild(new ReferencePostProcessChild(element, this, context.sourcePath));
+	}
+
+	async recoverBlockToRecoveryPage(id: string) {
+		const recoveryFile = await this.indexService.recoverBlockToRecoveryPage(id);
+		if (!recoveryFile) {
+			new Notice('Unable to recover source block to the recovery page.');
+			return;
+		}
+
+		new Notice(`Recovered source block to ${recoveryFile.path}.`);
+	}
+
+	async confirmBlockDeletion(id: string) {
+		await this.indexService.confirmBlockDeletion(id);
+		new Notice('Confirmed missing source block deletion.');
+	}
+
+	openStaleBlockReview() {
+		new StaleBlockReviewModal(this.app, this).open();
+	}
+
+	private async rebuildBlockReferenceIndex() {
+		new Notice('Building block index...');
+
+		try {
+			const stats = await this.indexService.rebuildIndex({
+				phase: 'rebuild',
+				onProgress: (progress) => {
+					this.updateIndexProgress(progress);
+				},
+			});
+			this.setIndexReadyStatus(stats);
+			new Notice(`Block index rebuilt: ${stats.fileCount} files, ${stats.blockCount} blocks, ${stats.referenceCount} references.`);
+		} catch (error) {
+			this.setIndexStatusMessage('Block index: rebuild failed');
+			console.error('Failed to rebuild block index:', error);
+			new Notice('Failed to rebuild block index.');
+		}
+	}
+
+	private updateIndexProgress(progress: IndexProgress) {
+		const phaseLabel = progress.phase === 'rebuild'
+			? 'building'
+			: progress.phase === 'reconcile'
+				? 'reconciling'
+				: 'loading cache';
+
+		if (progress.totalFiles <= 0) {
+			this.setIndexStatusMessage(`Block index: ${phaseLabel}...`);
+			return;
+		}
+
+		this.setIndexStatusMessage(
+			`Block index: ${phaseLabel} ${progress.processedFiles}/${progress.totalFiles} files | ${progress.blockCount} blocks | ${progress.referenceCount} refs`
+		);
+	}
+
+	private handleIndexStatus(status: IndexStatus) {
+		if (status.stats) {
+			this.lastKnownIndexStats = status.stats;
+		}
+
+		switch (status.state) {
+			case 'loading-cache':
+				this.setIndexStatusMessage('Block index: loading cache...');
+				return;
+			case 'cache-missing':
+				this.startupFullRebuildPending = true;
+				this.setIndexStatusMessage('Block index: no cache found, building full index...');
+				new Notice('No cached block index found. Building a new index...');
+				return;
+			case 'cache-loaded':
+				this.setIndexStatusMessage(
+					this.buildStatusText('Block index: cache loaded, checking vault changes...', status.stats)
+				);
+				return;
+			case 'reconcile-start':
+				if ((status.totalWork ?? 0) > 0) {
+					this.setIndexStatusMessage(
+						`Block index: reconciling 0/${status.totalWork} files | ${status.changedFiles ?? 0} changed | ${status.removedFiles ?? 0} removed`
+					);
+					return;
+				}
+
+				this.setIndexStatusMessage('Block index: checking vault changes...');
+				return;
+			case 'ready':
+				this.setIndexReadyStatus(status.stats ?? this.lastKnownIndexStats);
+				if (this.startupFullRebuildPending && status.source === 'rebuild' && status.stats) {
+					new Notice(`Initial block index build complete: ${status.stats.fileCount} files, ${status.stats.blockCount} blocks, ${status.stats.referenceCount} references.`);
+				}
+				this.startupFullRebuildPending = false;
+				return;
+		}
+	}
+
+	private setIndexReadyStatus(stats?: IndexBuildStats | null) {
+		this.lastKnownIndexStats = stats ?? this.lastKnownIndexStats;
+		this.setIndexStatusMessage(this.buildStatusText('Block index: ready', this.lastKnownIndexStats));
+	}
+
+	private buildStatusText(prefix: string, stats?: IndexBuildStats | null): string {
+		if (!stats) {
+			return prefix;
+		}
+
+		return `${prefix} | ${stats.fileCount} files | ${stats.blockCount} blocks | ${stats.referenceCount} refs`;
+	}
+
+	private setIndexStatusMessage(message: string) {
+		if (!this.statusBarEl) {
+			return;
+		}
+
+		this.statusBarEl.style.display = '';
+		this.statusBarEl.setText(message);
+	}
+
+	private refreshOpenMarkdownViews() {
+		this.app.workspace.iterateAllLeaves((leaf) => {
+			const view = leaf.view;
+			if (!(view instanceof MarkdownView)) {
+				return;
+			}
+
+			if (view.getMode() === 'preview') {
+				view.previewMode.rerender(true);
+			}
+		});
 	}
 }

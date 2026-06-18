@@ -1,20 +1,92 @@
-/**
- * Represents the metadata for a single block stored in the index.
- */
-export interface BlockCache {
-    /** The relative path to the file containing the block. */
-    filePath: string;
-    /** The raw text content of the block itself (the line with the dash). */
-    rawContent: string;
-    /** Descendant block lines belonging to this block, excluding the root line itself. */
-    childrenMarkdown?: string;
-    /** The starting line number of the block in the file (0-indexed). */
-    startLine: number;
-    /** An array of UUIDs of the direct children of this block. */
-    childrenIDs: string[];
-}
+export type BlockStatus = 'active' | 'stale' | 'confirmed_deleted';
 
 /**
- * The main index structure, mapping block UUIDs to their cache metadata.
+ * Represents the metadata for a single source block stored in the index.
  */
-export type BlockIndex = Map<string, BlockCache>;
+export interface BlockCache {
+    id: string;
+    filePath: string;
+    rawContent: string;
+    childrenMarkdown: string;
+    startLine: number;
+    endLine?: number;
+    childrenIDs: string[];
+    status: BlockStatus;
+    firstSeenAt: number;
+    lastSeenAt: number;
+    lostAt?: number;
+    recoveredAt?: number;
+}
+
+export interface BlockReferenceLocation {
+    filePath: string;
+    line: number;
+    ch: number;
+    kind: 'inline' | 'embed';
+}
+
+export interface FileIndexMeta {
+    path: string;
+    mtime: number;
+    size: number;
+    blockIds: string[];
+    referencedIds: string[];
+}
+
+export interface ParsedMarkdownFile {
+    blocks: Map<string, BlockCache>;
+    referencesById: Map<string, BlockReferenceLocation[]>;
+}
+
+export interface PersistedIndexCacheV2 {
+    schemaVersion: 2;
+    builtAt: number;
+    files: Record<string, FileIndexMeta>;
+    blocks: Record<string, BlockCache>;
+    refsById: Record<string, BlockReferenceLocation[]>;
+}
+
+export interface LegacyPersistedBlockCacheEntry {
+    0: string;
+    1: {
+        filePath: string;
+        rawContent: string;
+        childrenMarkdown?: string;
+        startLine: number;
+        childrenIDs?: string[];
+    };
+}
+
+export interface IndexBuildStats {
+    fileCount: number;
+    blockCount: number;
+    referenceCount: number;
+    staleBlockCount: number;
+}
+
+export type IndexPhase = 'load-cache' | 'reconcile' | 'rebuild';
+
+export interface IndexProgress {
+    processedFiles: number;
+    totalFiles: number;
+    blockCount: number;
+    referenceCount: number;
+    phase: IndexPhase;
+}
+
+export type IndexReadySource = 'cache' | 'reconcile' | 'rebuild';
+
+export interface IndexStatus {
+    state: 'loading-cache' | 'cache-missing' | 'cache-loaded' | 'reconcile-start' | 'ready';
+    stats?: IndexBuildStats;
+    source?: IndexReadySource;
+    changedFiles?: number;
+    removedFiles?: number;
+    totalWork?: number;
+}
+
+export interface StaleBlockRecord {
+    id: string;
+    block: BlockCache;
+    references: BlockReferenceLocation[];
+}

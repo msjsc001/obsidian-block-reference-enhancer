@@ -24,12 +24,19 @@ var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: tru
 // src/main.ts
 var main_exports = {};
 __export(main_exports, {
-  default: () => LogseqBlockRefEnhancer
+  default: () => BlockReferenceEnhancer
 });
 module.exports = __toCommonJS(main_exports);
-var import_obsidian4 = require("obsidian");
+var import_obsidian5 = require("obsidian");
+
+// src/services/IndexService.ts
+var import_obsidian = require("obsidian");
 
 // src/services/BlockParser.ts
+var EMBED_BLOCK_REF_REGEX = /\{\{embed\s+\(\(([A-Za-z0-9_-]{36,})\)\)\s*\}\}/y;
+var INLINE_BLOCK_REF_REGEX = /\(\(([A-Za-z0-9_-]{36,})\)\)/y;
+var FULLWIDTH_INLINE_BLOCK_REF_REGEX = /（（([A-Za-z0-9_-]{36,})））/y;
+var FENCE_REGEX = /^\s{0,3}(`{3,}|~{3,})/;
 var BlockParser = class {
   constructor() {
     this.PAGE_PROPS_REGEX = /^\s*[^-\s].*?::\s*.*$/;
@@ -37,17 +44,20 @@ var BlockParser = class {
     this.BLOCK_ID_REGEX = /^\s*id::\s*([a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12})/;
     this.BLOCK_PROPS_REGEX = /^\s*([^-\s].*?::\s*.*)$/;
   }
-  appendChildLine(target, line) {
-    target.childrenMarkdown = target.childrenMarkdown ? `${target.childrenMarkdown}
-${line}` : line;
-  }
   parse(filePath, content) {
+    return {
+      blocks: this.parseBlocks(filePath, content),
+      referencesById: this.parseReferences(filePath, content)
+    };
+  }
+  parseBlocks(filePath, content) {
+    var _a, _b, _c;
     const lines = content.split("\n");
     const allFoundBlocks = [];
     const parentStack = [];
     let inPageProperties = true;
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
+    for (let lineNumber = 0; lineNumber < lines.length; lineNumber++) {
+      const line = lines[lineNumber];
       if (inPageProperties) {
         if (this.PAGE_PROPS_REGEX.test(line) || line.trim() === "") {
           continue;
@@ -60,157 +70,372 @@ ${line}` : line;
         const rawContent = blockMatch[2];
         const newBlock = {
           block: {
+            id: "",
             filePath,
             rawContent,
             childrenMarkdown: "",
-            startLine: i,
-            childrenIDs: []
+            startLine: lineNumber,
+            endLine: lineNumber,
+            childrenIDs: [],
+            status: "active",
+            firstSeenAt: 0,
+            lastSeenAt: 0
           },
-          indentation,
-          line: i
+          indentation
         };
         while (parentStack.length > 0 && parentStack[parentStack.length - 1].indentation >= indentation) {
           parentStack.pop();
         }
         for (const ancestor of parentStack) {
-          this.appendChildLine(ancestor.block, line);
+          this.appendChildLine(ancestor.block, line, lineNumber);
         }
         if (parentStack.length > 0) {
           const parent = parentStack[parentStack.length - 1];
           parent.block._children = parent.block._children || [];
-          parent.block._children.push(newBlock);
+          (_a = parent.block._children) == null ? void 0 : _a.push(newBlock);
+          parent.block.endLine = lineNumber;
         }
         parentStack.push(newBlock);
         allFoundBlocks.push(newBlock);
-      } else {
-        const lastBlock = allFoundBlocks[allFoundBlocks.length - 1];
-        if (!lastBlock)
-          continue;
-        const idMatch = line.match(this.BLOCK_ID_REGEX);
-        if (idMatch && i === lastBlock.line + 1) {
-          const idIndentation = line.indexOf("id::");
-          if (idIndentation > lastBlock.indentation) {
-            lastBlock.id = idMatch[1];
-            continue;
-          }
+        continue;
+      }
+      const lastBlock = allFoundBlocks[allFoundBlocks.length - 1];
+      if (!lastBlock) {
+        continue;
+      }
+      const lineIndentation = this.getLineIndentation(line);
+      if (line.trim() === "") {
+        if (lineIndentation > lastBlock.indentation) {
+          this.appendBlockContinuation(lastBlock, line, lineNumber, parentStack);
         }
-        const propMatch = line.match(this.BLOCK_PROPS_REGEX);
-        if (propMatch) {
-          const propIndentation = line.indexOf(propMatch[1]);
-          if (propIndentation > lastBlock.indentation) {
-            lastBlock.block.rawContent += "\n" + line;
-            for (let index = 0; index < parentStack.length - 1; index++) {
-              this.appendChildLine(parentStack[index].block, line);
-            }
-          }
+        continue;
+      }
+      const idMatch = line.match(this.BLOCK_ID_REGEX);
+      if (idMatch && lineIndentation > lastBlock.indentation) {
+        lastBlock.id = idMatch[1];
+        lastBlock.block.endLine = Math.max((_b = lastBlock.block.endLine) != null ? _b : lastBlock.block.startLine, lineNumber);
+        for (let index = 0; index < parentStack.length - 1; index++) {
+          parentStack[index].block.endLine = Math.max((_c = parentStack[index].block.endLine) != null ? _c : parentStack[index].block.startLine, lineNumber);
         }
+        continue;
+      }
+      const propMatch = line.match(this.BLOCK_PROPS_REGEX);
+      if (propMatch && lineIndentation > lastBlock.indentation) {
+        this.appendBlockContinuation(lastBlock, line, lineNumber, parentStack);
+        continue;
+      }
+      if (lineIndentation > lastBlock.indentation) {
+        this.appendBlockContinuation(lastBlock, line, lineNumber, parentStack);
       }
     }
     const finalIndex = /* @__PURE__ */ new Map();
     for (const blockInProgress of allFoundBlocks) {
-      if (blockInProgress.block._children) {
-        blockInProgress.block.childrenIDs = blockInProgress.block._children.map((child) => child.id).filter((id) => !!id);
-        delete blockInProgress.block._children;
+      const childHolder = blockInProgress.block;
+      if (childHolder._children) {
+        blockInProgress.block.childrenIDs = childHolder._children.map((child) => child.id).filter((id) => !!id);
+        delete childHolder._children;
       }
       if (blockInProgress.id) {
+        blockInProgress.block.id = blockInProgress.id;
         finalIndex.set(blockInProgress.id, blockInProgress.block);
       }
     }
     return finalIndex;
   }
+  parseReferences(filePath, content) {
+    var _a;
+    const referencesById = /* @__PURE__ */ new Map();
+    const lines = content.split("\n");
+    let inFrontmatter = ((_a = lines[0]) == null ? void 0 : _a.trim()) === "---";
+    let fenceState = null;
+    for (let lineNumber = 0; lineNumber < lines.length; lineNumber++) {
+      const line = lines[lineNumber];
+      if (inFrontmatter) {
+        if (lineNumber > 0 && (line.trim() === "---" || line.trim() === "...")) {
+          inFrontmatter = false;
+        }
+        continue;
+      }
+      if (fenceState) {
+        if (this.isClosingFence(line, fenceState)) {
+          fenceState = null;
+        }
+        continue;
+      }
+      const nextFenceState = this.getFenceState(line);
+      if (nextFenceState) {
+        fenceState = nextFenceState;
+        continue;
+      }
+      this.scanLineForReferences(filePath, line, lineNumber, referencesById);
+    }
+    return referencesById;
+  }
+  scanLineForReferences(filePath, line, lineNumber, referencesById) {
+    let index = 0;
+    while (index < line.length) {
+      if (line[index] === "`") {
+        index = this.findInlineCodeSpanEnd(line, index);
+        continue;
+      }
+      EMBED_BLOCK_REF_REGEX.lastIndex = index;
+      const embedMatch = EMBED_BLOCK_REF_REGEX.exec(line);
+      if (embedMatch) {
+        this.addReference(referencesById, embedMatch[1], {
+          filePath,
+          line: lineNumber,
+          ch: embedMatch.index,
+          kind: "embed"
+        });
+        index = embedMatch.index + embedMatch[0].length;
+        continue;
+      }
+      INLINE_BLOCK_REF_REGEX.lastIndex = index;
+      const inlineMatch = INLINE_BLOCK_REF_REGEX.exec(line);
+      if (inlineMatch) {
+        this.addReference(referencesById, inlineMatch[1], {
+          filePath,
+          line: lineNumber,
+          ch: inlineMatch.index,
+          kind: "inline"
+        });
+        index = inlineMatch.index + inlineMatch[0].length;
+        continue;
+      }
+      FULLWIDTH_INLINE_BLOCK_REF_REGEX.lastIndex = index;
+      const fullwidthMatch = FULLWIDTH_INLINE_BLOCK_REF_REGEX.exec(line);
+      if (fullwidthMatch) {
+        this.addReference(referencesById, fullwidthMatch[1], {
+          filePath,
+          line: lineNumber,
+          ch: fullwidthMatch.index,
+          kind: "inline"
+        });
+        index = fullwidthMatch.index + fullwidthMatch[0].length;
+        continue;
+      }
+      index++;
+    }
+  }
+  addReference(referencesById, id, location) {
+    const existing = referencesById.get(id);
+    if (existing) {
+      existing.push(location);
+      return;
+    }
+    referencesById.set(id, [location]);
+  }
+  appendBlockContinuation(blockInProgress, line, lineNumber, parentStack) {
+    blockInProgress.block.rawContent = blockInProgress.block.rawContent ? `${blockInProgress.block.rawContent}
+${line}` : line;
+    blockInProgress.block.endLine = lineNumber;
+    for (let index = 0; index < parentStack.length - 1; index++) {
+      this.appendChildLine(parentStack[index].block, line, lineNumber);
+    }
+  }
+  appendChildLine(target, line, lineNumber) {
+    target.childrenMarkdown = target.childrenMarkdown ? `${target.childrenMarkdown}
+${line}` : line;
+    target.endLine = lineNumber;
+  }
+  getLineIndentation(line) {
+    const match = line.match(/^(\s*)/);
+    return match ? match[1].length : 0;
+  }
+  getFenceState(line) {
+    const match = line.match(FENCE_REGEX);
+    if (!match) {
+      return null;
+    }
+    const marker = match[1];
+    return {
+      char: marker[0],
+      length: marker.length
+    };
+  }
+  isClosingFence(line, fenceState) {
+    const closingRegex = new RegExp(`^\\s{0,3}${fenceState.char}{${fenceState.length},}\\s*$`);
+    return closingRegex.test(line);
+  }
+  findInlineCodeSpanEnd(line, start) {
+    let ticks = 0;
+    while (start + ticks < line.length && line[start + ticks] === "`") {
+      ticks++;
+    }
+    const delimiter = "`".repeat(ticks);
+    const closingIndex = line.indexOf(delimiter, start + ticks);
+    if (closingIndex === -1) {
+      return start + ticks;
+    }
+    return closingIndex + ticks;
+  }
 };
 
 // src/services/IndexService.ts
-var import_obsidian = require("obsidian");
-var IndexService = class {
+var CACHE_SCHEMA_VERSION = 2;
+var RECOVERY_PAGE_PATH = "pages/Block Recovery.md";
+var IndexService = class extends import_obsidian.Events {
   constructor(app, pluginDataPath) {
+    super();
+    this.recoverPagePath = (0, import_obsidian.normalizePath)(RECOVERY_PAGE_PATH);
+    this.blocksById = /* @__PURE__ */ new Map();
+    this.refsById = /* @__PURE__ */ new Map();
+    this.fileMetaByPath = /* @__PURE__ */ new Map();
+    this.indexRevision = 0;
+    this.operationQueue = Promise.resolve();
     this.app = app;
     this.blockParser = new BlockParser();
-    this.index = /* @__PURE__ */ new Map();
     this.CACHE_FILE_PATH = `${pluginDataPath}/block-cache.json`;
     this.debouncedSave = (0, import_obsidian.debounce)(() => this.saveIndexToCache(), 1e3, true);
   }
-  /**
-   * Builds the index for the entire vault.
-   */
-  async initialize() {
+  async initialize(callbacks = {}) {
+    this.emitStatus({ state: "loading-cache" }, callbacks.onStatus);
     const loaded = await this.loadIndexFromCache();
     if (!loaded) {
-      await this.buildIndex();
-    }
-  }
-  async saveIndexToCache() {
-    try {
-      const data = JSON.stringify(Array.from(this.index.entries()));
-      await this.app.vault.adapter.write(this.CACHE_FILE_PATH, data);
-    } catch (error) {
-      console.error("Error saving index to cache:", error);
-    }
-  }
-  async loadIndexFromCache() {
-    try {
-      if (!await this.app.vault.adapter.exists(this.CACHE_FILE_PATH)) {
-        return false;
-      }
-      const data = await this.app.vault.adapter.read(this.CACHE_FILE_PATH);
-      const entries = JSON.parse(data);
-      if (entries.some(([, block]) => typeof block.childrenMarkdown !== "string")) {
-        return false;
-      }
-      this.index = new Map(entries);
-      return true;
-    } catch (error) {
-      console.error("Error loading index from cache:", error);
-      return false;
-    }
-  }
-  async buildIndex() {
-    this.index.clear();
-    const markdownFiles = this.app.vault.getMarkdownFiles();
-    let processedCount = 0;
-    for (const file of markdownFiles) {
-      const content = await this.app.vault.cachedRead(file);
-      const fileBlocks = this.blockParser.parse(file.path, content);
-      fileBlocks.forEach((block, id) => {
-        this.index.set(id, block);
+      this.emitStatus({ state: "cache-missing" }, callbacks.onStatus);
+      const stats = await this.rebuildIndex({
+        phase: "rebuild",
+        onProgress: callbacks.onProgress
       });
-      processedCount++;
-      if (processedCount % 100 === 0) {
-        await new Promise((resolve) => setTimeout(resolve, 0));
-      }
+      this.emitStatus({ state: "ready", source: "rebuild", stats }, callbacks.onStatus);
+      return;
     }
-    await this.saveIndexToCache();
+    this.emitStatus({
+      state: "cache-loaded",
+      stats: this.getStats()
+    }, callbacks.onStatus);
+    void this.queueOperation(async () => {
+      const result = await this.reconcileVaultInternal(callbacks);
+      this.emitStatus({
+        state: "ready",
+        source: result.didChange ? "reconcile" : "cache",
+        stats: this.getStats()
+      }, callbacks.onStatus);
+    }).catch((error) => {
+      console.error("Error reconciling block index:", error);
+    });
+  }
+  async rebuildIndex(options = {}) {
+    return this.queueOperation(() => {
+      var _a;
+      return this.rebuildIndexInternal({
+        phase: (_a = options.phase) != null ? _a : "rebuild",
+        onProgress: options.onProgress
+      });
+    });
   }
   async processFileChange(file) {
-    this.removeFileFromIndex(file.path);
-    const content = await this.app.vault.cachedRead(file);
-    const fileBlocks = this.blockParser.parse(file.path, content);
-    fileBlocks.forEach((block, id) => {
-      this.index.set(id, block);
+    await this.queueOperation(async () => {
+      await this.processFileChangeInternal(file, true);
     });
-    this.debouncedSave();
   }
-  processFileDelete(filePath) {
-    this.removeFileFromIndex(filePath);
-    this.debouncedSave();
-  }
-  processFileRename(oldPath, newPath) {
-    for (const block of this.index.values()) {
-      if (block.filePath === oldPath) {
-        block.filePath = newPath;
+  async processFileDelete(filePath) {
+    await this.queueOperation(async () => {
+      const didChange = this.removeFileFromIndexInternal(filePath);
+      if (!didChange) {
+        return;
       }
-    }
-    this.debouncedSave();
+      this.scheduleSave();
+      this.notifyIndexUpdated();
+    });
+  }
+  async processFileRename(oldPath, newPath) {
+    await this.queueOperation(async () => {
+      const normalizedNewPath = (0, import_obsidian.normalizePath)(newPath);
+      const fileMeta = this.fileMetaByPath.get(oldPath);
+      let didChange = false;
+      if (fileMeta) {
+        this.fileMetaByPath.delete(oldPath);
+        this.fileMetaByPath.set(normalizedNewPath, {
+          ...fileMeta,
+          path: normalizedNewPath
+        });
+        didChange = true;
+      }
+      for (const block of this.blocksById.values()) {
+        if (block.filePath === oldPath) {
+          block.filePath = normalizedNewPath;
+          didChange = true;
+        }
+      }
+      for (const references of this.refsById.values()) {
+        for (const reference of references) {
+          if (reference.filePath === oldPath) {
+            reference.filePath = normalizedNewPath;
+            didChange = true;
+          }
+        }
+      }
+      if (!didChange) {
+        return;
+      }
+      this.scheduleSave();
+      this.notifyIndexUpdated();
+    });
   }
   getBlock(id) {
-    return this.index.get(id);
+    const block = this.blocksById.get(id);
+    if (!block || block.status === "confirmed_deleted") {
+      return void 0;
+    }
+    return block;
+  }
+  getBlockRecord(id) {
+    return this.blocksById.get(id);
+  }
+  getBlockStatus(id) {
+    var _a, _b;
+    return (_b = (_a = this.blocksById.get(id)) == null ? void 0 : _a.status) != null ? _b : null;
+  }
+  getReferencesToBlock(id) {
+    var _a;
+    return [...(_a = this.refsById.get(id)) != null ? _a : []];
+  }
+  getReferenceCount(id) {
+    var _a, _b;
+    return (_b = (_a = this.refsById.get(id)) == null ? void 0 : _a.length) != null ? _b : 0;
+  }
+  getStaleBlocks() {
+    return [...this.blocksById.entries()].filter(([, block]) => block.status === "stale").map(([id, block]) => ({
+      id,
+      block,
+      references: this.getReferencesToBlock(id)
+    })).filter((item) => item.references.length > 0).sort((left, right) => right.references.length - left.references.length || left.block.filePath.localeCompare(right.block.filePath));
+  }
+  getIndexRevision() {
+    return this.indexRevision;
+  }
+  getStats() {
+    let activeBlockCount = 0;
+    let staleBlockCount = 0;
+    for (const block of this.blocksById.values()) {
+      if (block.status === "active") {
+        activeBlockCount++;
+      } else if (block.status === "stale") {
+        staleBlockCount++;
+      }
+    }
+    let referenceCount = 0;
+    for (const references of this.refsById.values()) {
+      referenceCount += references.length;
+    }
+    return {
+      fileCount: this.fileMetaByPath.size,
+      blockCount: activeBlockCount,
+      referenceCount,
+      staleBlockCount
+    };
   }
   searchBlocks(query) {
-    if (!query)
+    if (!query) {
       return [];
+    }
     const lowerCaseQuery = query.toLowerCase();
     const results = [];
-    for (const [id, block] of this.index.entries()) {
+    for (const [id, block] of this.blocksById.entries()) {
+      if (block.status !== "active") {
+        continue;
+      }
       if (block.rawContent.toLowerCase().includes(lowerCaseQuery)) {
         results.push({ id, block });
       }
@@ -218,7 +443,10 @@ var IndexService = class {
     return results.slice(0, 50);
   }
   findBlockByFileAndLine(filePath, line) {
-    for (const [id, block] of this.index.entries()) {
+    for (const [id, block] of this.blocksById.entries()) {
+      if (block.status !== "active") {
+        continue;
+      }
       if (block.filePath === filePath && block.startLine === line) {
         return { id, block };
       }
@@ -226,17 +454,475 @@ var IndexService = class {
     return null;
   }
   addBlock(id, block) {
-    this.index.set(id, block);
-    this.debouncedSave();
+    var _a, _b, _c;
+    const now = Date.now();
+    const existing = this.blocksById.get(id);
+    this.blocksById.set(id, {
+      id,
+      filePath: block.filePath,
+      rawContent: block.rawContent,
+      childrenMarkdown: (_a = block.childrenMarkdown) != null ? _a : "",
+      startLine: block.startLine,
+      endLine: (_b = block.endLine) != null ? _b : block.startLine,
+      childrenIDs: block.childrenIDs,
+      status: "active",
+      firstSeenAt: (_c = existing == null ? void 0 : existing.firstSeenAt) != null ? _c : now,
+      lastSeenAt: now,
+      recoveredAt: (existing == null ? void 0 : existing.status) === "stale" ? now : existing == null ? void 0 : existing.recoveredAt
+    });
+    this.scheduleSave();
+    this.notifyIndexUpdated();
   }
-  removeFileFromIndex(filePath) {
-    const idsToRemove = [];
-    for (const [id, block] of this.index.entries()) {
-      if (block.filePath === filePath) {
-        idsToRemove.push(id);
+  async confirmBlockDeletion(id) {
+    await this.queueOperation(async () => {
+      const block = this.blocksById.get(id);
+      if (!block || block.status !== "stale") {
+        return;
+      }
+      block.status = "confirmed_deleted";
+      this.scheduleSave();
+      this.notifyIndexUpdated();
+    });
+  }
+  async recoverBlockToRecoveryPage(id) {
+    return this.queueOperation(async () => {
+      const block = this.blocksById.get(id);
+      if (!block || block.status !== "stale") {
+        return null;
+      }
+      await this.ensureRecoveryFolderExists();
+      const existingFile = this.app.vault.getFileByPath(this.recoverPagePath);
+      const recoveryMarkdown = this.buildRecoveryMarkdown(block);
+      let recoveryFile;
+      if (existingFile) {
+        const existingContent = await this.app.vault.cachedRead(existingFile);
+        if (this.containsBlockId(existingContent, id)) {
+          recoveryFile = existingFile;
+        } else {
+          const prefix = existingContent.trim().length > 0 ? "\n\n" : "";
+          await this.app.vault.append(existingFile, `${prefix}${recoveryMarkdown}`);
+          recoveryFile = existingFile;
+        }
+      } else {
+        recoveryFile = await this.app.vault.create(this.recoverPagePath, `# Block Recovery
+
+${recoveryMarkdown}`);
+      }
+      await this.processFileChangeInternal(recoveryFile, false);
+      return recoveryFile;
+    });
+  }
+  async rebuildIndexInternal({ phase, onProgress }) {
+    var _a;
+    const previousBlocks = new Map(this.blocksById);
+    const markdownFiles = this.app.vault.getMarkdownFiles();
+    const nextBlocks = /* @__PURE__ */ new Map();
+    const nextRefs = /* @__PURE__ */ new Map();
+    const nextFileMeta = /* @__PURE__ */ new Map();
+    let processedFiles = 0;
+    this.emitProgress({
+      processedFiles: 0,
+      totalFiles: markdownFiles.length,
+      blockCount: 0,
+      referenceCount: 0,
+      phase
+    }, onProgress);
+    for (const file of markdownFiles) {
+      const parsed = await this.parseFile(file);
+      this.populateStateFromParsedFile(nextBlocks, nextRefs, nextFileMeta, file, parsed, previousBlocks);
+      processedFiles++;
+      if (processedFiles % 50 === 0 || processedFiles === markdownFiles.length) {
+        this.emitProgress({
+          processedFiles,
+          totalFiles: markdownFiles.length,
+          blockCount: this.countActiveBlocks(nextBlocks),
+          referenceCount: this.countReferenceLocations(nextRefs),
+          phase
+        }, onProgress);
+        await this.yieldToMainThread();
       }
     }
-    idsToRemove.forEach((id) => this.index.delete(id));
+    for (const [id, previousBlock] of previousBlocks.entries()) {
+      if (nextBlocks.has(id)) {
+        continue;
+      }
+      if (previousBlock.status === "confirmed_deleted") {
+        nextBlocks.set(id, previousBlock);
+        continue;
+      }
+      const references = nextRefs.get(id);
+      if (references && references.length > 0) {
+        nextBlocks.set(id, {
+          ...previousBlock,
+          status: "stale",
+          lostAt: (_a = previousBlock.lostAt) != null ? _a : Date.now()
+        });
+      }
+    }
+    this.blocksById = nextBlocks;
+    this.refsById = nextRefs;
+    this.fileMetaByPath = nextFileMeta;
+    await this.saveIndexToCache();
+    this.notifyIndexUpdated();
+    return this.getStats();
+  }
+  async reconcileVaultInternal({ onProgress, onStatus }) {
+    const markdownFiles = this.app.vault.getMarkdownFiles();
+    if (this.fileMetaByPath.size === 0) {
+      const totalWork2 = markdownFiles.length;
+      this.emitStatus({
+        state: "reconcile-start",
+        changedFiles: markdownFiles.length,
+        removedFiles: 0,
+        totalWork: totalWork2
+      }, onStatus);
+      await this.rebuildIndexInternal({ phase: "reconcile", onProgress });
+      return {
+        didChange: true,
+        changedFiles: markdownFiles.length,
+        removedFiles: 0,
+        totalWork: totalWork2
+      };
+    }
+    const currentFilesByPath = new Map(markdownFiles.map((file) => [file.path, file]));
+    const cachedPaths = [...this.fileMetaByPath.keys()];
+    const removedPaths = cachedPaths.filter((path) => !currentFilesByPath.has(path));
+    const changedFiles = markdownFiles.filter((file) => {
+      const metadata = this.fileMetaByPath.get(file.path);
+      return !metadata || metadata.mtime !== file.stat.mtime || metadata.size !== file.stat.size;
+    });
+    const totalWork = removedPaths.length + changedFiles.length;
+    this.emitStatus({
+      state: "reconcile-start",
+      changedFiles: changedFiles.length,
+      removedFiles: removedPaths.length,
+      totalWork
+    }, onStatus);
+    if (removedPaths.length === 0 && changedFiles.length === 0) {
+      return {
+        didChange: false,
+        changedFiles: 0,
+        removedFiles: 0,
+        totalWork: 0
+      };
+    }
+    let didChange = false;
+    let processedFiles = 0;
+    this.emitProgress({
+      processedFiles: 0,
+      totalFiles: totalWork,
+      blockCount: this.getStats().blockCount,
+      referenceCount: this.getStats().referenceCount,
+      phase: "reconcile"
+    }, onProgress);
+    for (const removedPath of removedPaths) {
+      didChange = this.removeFileFromIndexInternal(removedPath) || didChange;
+      processedFiles++;
+      this.emitProgress({
+        processedFiles,
+        totalFiles: totalWork,
+        blockCount: this.getStats().blockCount,
+        referenceCount: this.getStats().referenceCount,
+        phase: "reconcile"
+      }, onProgress);
+    }
+    for (const file of changedFiles) {
+      didChange = await this.processFileChangeInternal(file, false) || didChange;
+      processedFiles++;
+      if (processedFiles % 50 === 0 || processedFiles === totalWork) {
+        this.emitProgress({
+          processedFiles,
+          totalFiles: totalWork,
+          blockCount: this.getStats().blockCount,
+          referenceCount: this.getStats().referenceCount,
+          phase: "reconcile"
+        }, onProgress);
+      }
+      await this.yieldToMainThread();
+    }
+    if (!didChange) {
+      return {
+        didChange: false,
+        changedFiles: changedFiles.length,
+        removedFiles: removedPaths.length,
+        totalWork
+      };
+    }
+    await this.saveIndexToCache();
+    this.notifyIndexUpdated();
+    return {
+      didChange: true,
+      changedFiles: changedFiles.length,
+      removedFiles: removedPaths.length,
+      totalWork
+    };
+  }
+  async processFileChangeInternal(file, emitUpdate) {
+    var _a, _b, _c;
+    const parsed = await this.parseFile(file);
+    const previousMeta = this.fileMetaByPath.get(file.path);
+    const previousBlockIds = new Set((_a = previousMeta == null ? void 0 : previousMeta.blockIds) != null ? _a : []);
+    const previousBlocks = /* @__PURE__ */ new Map();
+    for (const blockId of previousBlockIds) {
+      const existing = this.blocksById.get(blockId);
+      if (existing) {
+        previousBlocks.set(blockId, existing);
+      }
+      this.blocksById.delete(blockId);
+    }
+    this.removeReferencesForFile(file.path, (_b = previousMeta == null ? void 0 : previousMeta.referencedIds) != null ? _b : []);
+    this.fileMetaByPath.delete(file.path);
+    this.populateStateFromParsedFile(this.blocksById, this.refsById, this.fileMetaByPath, file, parsed, previousBlocks);
+    const nextBlockIds = /* @__PURE__ */ new Set([...parsed.blocks.keys()]);
+    for (const [blockId, previousBlock] of previousBlocks.entries()) {
+      if (nextBlockIds.has(blockId)) {
+        continue;
+      }
+      const references = this.refsById.get(blockId);
+      if (references && references.length > 0) {
+        this.blocksById.set(blockId, {
+          ...previousBlock,
+          status: "stale",
+          lostAt: (_c = previousBlock.lostAt) != null ? _c : Date.now()
+        });
+      }
+    }
+    const didChange = true;
+    if (emitUpdate) {
+      this.scheduleSave();
+      this.notifyIndexUpdated();
+    }
+    return didChange;
+  }
+  removeFileFromIndexInternal(filePath) {
+    var _a;
+    const fileMeta = this.fileMetaByPath.get(filePath);
+    if (!fileMeta) {
+      return false;
+    }
+    this.fileMetaByPath.delete(filePath);
+    this.removeReferencesForFile(filePath, fileMeta.referencedIds);
+    let didChange = false;
+    for (const blockId of fileMeta.blockIds) {
+      const block = this.blocksById.get(blockId);
+      if (!block) {
+        continue;
+      }
+      didChange = true;
+      const references = this.refsById.get(blockId);
+      if (references && references.length > 0) {
+        this.blocksById.set(blockId, {
+          ...block,
+          status: "stale",
+          lostAt: (_a = block.lostAt) != null ? _a : Date.now()
+        });
+        continue;
+      }
+      this.blocksById.delete(blockId);
+    }
+    return didChange;
+  }
+  populateStateFromParsedFile(targetBlocks, targetRefs, targetFileMeta, file, parsed, previousBlocks) {
+    var _a, _b;
+    const now = Date.now();
+    const blockIds = [...parsed.blocks.keys()];
+    const referencedIds = [...parsed.referencesById.keys()];
+    for (const [id, parsedBlock] of parsed.blocks.entries()) {
+      const previousBlock = (_a = previousBlocks.get(id)) != null ? _a : targetBlocks.get(id);
+      targetBlocks.set(id, {
+        ...parsedBlock,
+        id,
+        status: "active",
+        firstSeenAt: (_b = previousBlock == null ? void 0 : previousBlock.firstSeenAt) != null ? _b : now,
+        lastSeenAt: now,
+        lostAt: void 0,
+        recoveredAt: (previousBlock == null ? void 0 : previousBlock.status) === "stale" ? now : previousBlock == null ? void 0 : previousBlock.recoveredAt
+      });
+    }
+    for (const [id, references] of parsed.referencesById.entries()) {
+      const existing = targetRefs.get(id);
+      if (existing) {
+        existing.push(...references);
+        continue;
+      }
+      targetRefs.set(id, [...references]);
+    }
+    targetFileMeta.set(file.path, {
+      path: file.path,
+      mtime: file.stat.mtime,
+      size: file.stat.size,
+      blockIds,
+      referencedIds
+    });
+  }
+  removeReferencesForFile(filePath, referencedIds) {
+    for (const referencedId of referencedIds) {
+      const references = this.refsById.get(referencedId);
+      if (!references) {
+        continue;
+      }
+      const nextReferences = references.filter((reference) => reference.filePath !== filePath);
+      if (nextReferences.length === 0) {
+        this.refsById.delete(referencedId);
+        const block = this.blocksById.get(referencedId);
+        if ((block == null ? void 0 : block.status) === "stale") {
+          this.blocksById.delete(referencedId);
+        }
+        continue;
+      }
+      this.refsById.set(referencedId, nextReferences);
+    }
+  }
+  async parseFile(file) {
+    const content = await this.app.vault.cachedRead(file);
+    return this.blockParser.parse(file.path, content);
+  }
+  async loadIndexFromCache() {
+    try {
+      if (!await this.app.vault.adapter.exists(this.CACHE_FILE_PATH)) {
+        return false;
+      }
+      const data = await this.app.vault.adapter.read(this.CACHE_FILE_PATH);
+      const parsed = JSON.parse(data);
+      if (Array.isArray(parsed)) {
+        this.loadLegacyCache(parsed);
+        this.notifyIndexUpdated();
+        return true;
+      }
+      if (parsed.schemaVersion !== CACHE_SCHEMA_VERSION) {
+        return false;
+      }
+      this.blocksById = new Map(
+        Object.entries(parsed.blocks).map(([id, block]) => [id, this.normalizeLoadedBlock(id, block)])
+      );
+      this.refsById = new Map(
+        Object.entries(parsed.refsById).map(([id, references]) => [id, references.map((reference) => ({ ...reference }))])
+      );
+      this.fileMetaByPath = new Map(
+        Object.entries(parsed.files).map(([path, meta]) => [path, { ...meta }])
+      );
+      this.notifyIndexUpdated();
+      return true;
+    } catch (error) {
+      console.error("Error loading index from cache:", error);
+      return false;
+    }
+  }
+  loadLegacyCache(entries) {
+    var _a, _b;
+    const now = Date.now();
+    this.blocksById = /* @__PURE__ */ new Map();
+    this.refsById = /* @__PURE__ */ new Map();
+    this.fileMetaByPath = /* @__PURE__ */ new Map();
+    for (const [id, block] of entries) {
+      this.blocksById.set(id, {
+        id,
+        filePath: block.filePath,
+        rawContent: block.rawContent,
+        childrenMarkdown: (_a = block.childrenMarkdown) != null ? _a : "",
+        startLine: block.startLine,
+        endLine: block.startLine,
+        childrenIDs: (_b = block.childrenIDs) != null ? _b : [],
+        status: "active",
+        firstSeenAt: now,
+        lastSeenAt: now
+      });
+    }
+  }
+  normalizeLoadedBlock(id, block) {
+    var _a, _b, _c, _d;
+    return {
+      ...block,
+      id,
+      childrenMarkdown: (_a = block.childrenMarkdown) != null ? _a : "",
+      status: (_b = block.status) != null ? _b : "active",
+      firstSeenAt: (_c = block.firstSeenAt) != null ? _c : Date.now(),
+      lastSeenAt: (_d = block.lastSeenAt) != null ? _d : Date.now()
+    };
+  }
+  async saveIndexToCache() {
+    try {
+      const persisted = {
+        schemaVersion: CACHE_SCHEMA_VERSION,
+        builtAt: Date.now(),
+        files: Object.fromEntries(this.fileMetaByPath.entries()),
+        blocks: Object.fromEntries(this.blocksById.entries()),
+        refsById: Object.fromEntries(this.refsById.entries())
+      };
+      await this.app.vault.adapter.write(this.CACHE_FILE_PATH, JSON.stringify(persisted));
+    } catch (error) {
+      console.error("Error saving index to cache:", error);
+    }
+  }
+  scheduleSave() {
+    this.debouncedSave();
+  }
+  emitProgress(progress, onProgress) {
+    onProgress == null ? void 0 : onProgress(progress);
+    this.trigger("index-progress", progress);
+  }
+  emitStatus(status, onStatus) {
+    onStatus == null ? void 0 : onStatus(status);
+    this.trigger("index-status", status);
+  }
+  notifyIndexUpdated() {
+    this.indexRevision += 1;
+    this.trigger("index-updated", {
+      revision: this.indexRevision,
+      stats: this.getStats()
+    });
+  }
+  async ensureRecoveryFolderExists() {
+    const folderPath = (0, import_obsidian.normalizePath)("pages");
+    if (await this.app.vault.adapter.exists(folderPath)) {
+      return;
+    }
+    await this.app.vault.createFolder(folderPath);
+  }
+  buildRecoveryMarkdown(block) {
+    var _a;
+    const rawLines = block.rawContent.split(/\r?\n/);
+    const rootLine = (_a = rawLines[0]) != null ? _a : "";
+    const continuationLines = rawLines.slice(1);
+    const metadataLines = [
+      `  id:: ${block.id}`,
+      `  recovered-from:: ${block.filePath}`,
+      `  recovered-at:: ${new Date().toISOString()}`
+    ];
+    const lines = [`- ${rootLine}`, ...continuationLines, ...metadataLines];
+    if (block.childrenMarkdown.trim()) {
+      lines.push(...block.childrenMarkdown.split(/\r?\n/));
+    }
+    return lines.join("\n");
+  }
+  containsBlockId(content, id) {
+    const escapedId = id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const pattern = new RegExp(`^\\s*id::\\s*${escapedId}\\s*$`, "m");
+    return pattern.test(content);
+  }
+  countActiveBlocks(blocks) {
+    let count = 0;
+    for (const block of blocks.values()) {
+      if (block.status === "active") {
+        count++;
+      }
+    }
+    return count;
+  }
+  countReferenceLocations(refs) {
+    let count = 0;
+    for (const references of refs.values()) {
+      count += references.length;
+    }
+    return count;
+  }
+  async yieldToMainThread() {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  queueOperation(operation) {
+    const next = this.operationQueue.then(operation, operation);
+    this.operationQueue = next.then(() => void 0, () => void 0);
+    return next;
   }
 };
 
@@ -265,7 +951,7 @@ var BlockSuggest = class extends import_obsidian2.EditorSuggest {
   }
   renderSuggestion(item, el) {
     el.createEl("div", { text: item.block.rawContent.substring(0, 100) });
-    el.createEl("small", { text: item.block.filePath, cls: "logseq-suggest-filepath" });
+    el.createEl("small", { text: item.block.filePath, cls: "block-reference-suggest-filepath" });
   }
   selectSuggestion(item, evt) {
     if (!this.context)
@@ -290,8 +976,8 @@ var BlockReferenceWidget = class extends import_view.WidgetType {
     this.interaction = interaction;
   }
   eq(other) {
-    var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x, _y, _z, _A, _B;
-    return this.state === other.state && this.mode === other.mode && this.content === other.content && ((_a = this.interaction) == null ? void 0 : _a.from) === ((_b = other.interaction) == null ? void 0 : _b.from) && ((_c = this.interaction) == null ? void 0 : _c.to) === ((_d = other.interaction) == null ? void 0 : _d.to) && ((_e = this.interaction) == null ? void 0 : _e.revealPos) === ((_f = other.interaction) == null ? void 0 : _f.revealPos) && ((_g = this.interaction) == null ? void 0 : _g.blockWidget) === ((_h = other.interaction) == null ? void 0 : _h.blockWidget) && ((_i = this.interaction) == null ? void 0 : _i.preserveListMarker) === ((_j = other.interaction) == null ? void 0 : _j.preserveListMarker) && ((_k = this.interaction) == null ? void 0 : _k.availableInlineWidthPx) === ((_l = other.interaction) == null ? void 0 : _l.availableInlineWidthPx) && ((_m = this.interaction) == null ? void 0 : _m.listPrefixColumns) === ((_n = other.interaction) == null ? void 0 : _n.listPrefixColumns) && ((_o = this.interaction) == null ? void 0 : _o.listMarkerOffsetPx) === ((_p = other.interaction) == null ? void 0 : _p.listMarkerOffsetPx) && ((_q = this.interaction) == null ? void 0 : _q.listContentOffsetPx) === ((_r = other.interaction) == null ? void 0 : _r.listContentOffsetPx) && ((_s = this.interaction) == null ? void 0 : _s.cardPos) === ((_t = other.interaction) == null ? void 0 : _t.cardPos) && ((_u = this.interaction) == null ? void 0 : _u.refId) === ((_v = other.interaction) == null ? void 0 : _v.refId) && ((_w = this.interaction) == null ? void 0 : _w.signature) === ((_x = other.interaction) == null ? void 0 : _x.signature) && ((_y = this.interaction) == null ? void 0 : _y.lineHeightPx) === ((_z = other.interaction) == null ? void 0 : _z.lineHeightPx) && ((_A = this.interaction) == null ? void 0 : _A.reservedHeightPx) === ((_B = other.interaction) == null ? void 0 : _B.reservedHeightPx);
+    var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k, _l, _m, _n, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x, _y, _z, _A, _B, _C, _D;
+    return this.state === other.state && this.mode === other.mode && this.content === other.content && ((_a = this.interaction) == null ? void 0 : _a.from) === ((_b = other.interaction) == null ? void 0 : _b.from) && ((_c = this.interaction) == null ? void 0 : _c.to) === ((_d = other.interaction) == null ? void 0 : _d.to) && ((_e = this.interaction) == null ? void 0 : _e.revealPos) === ((_f = other.interaction) == null ? void 0 : _f.revealPos) && ((_g = this.interaction) == null ? void 0 : _g.stale) === ((_h = other.interaction) == null ? void 0 : _h.stale) && ((_i = this.interaction) == null ? void 0 : _i.blockWidget) === ((_j = other.interaction) == null ? void 0 : _j.blockWidget) && ((_k = this.interaction) == null ? void 0 : _k.preserveListMarker) === ((_l = other.interaction) == null ? void 0 : _l.preserveListMarker) && ((_m = this.interaction) == null ? void 0 : _m.availableInlineWidthPx) === ((_n = other.interaction) == null ? void 0 : _n.availableInlineWidthPx) && ((_o = this.interaction) == null ? void 0 : _o.listPrefixColumns) === ((_p = other.interaction) == null ? void 0 : _p.listPrefixColumns) && ((_q = this.interaction) == null ? void 0 : _q.listMarkerOffsetPx) === ((_r = other.interaction) == null ? void 0 : _r.listMarkerOffsetPx) && ((_s = this.interaction) == null ? void 0 : _s.listContentOffsetPx) === ((_t = other.interaction) == null ? void 0 : _t.listContentOffsetPx) && ((_u = this.interaction) == null ? void 0 : _u.cardPos) === ((_v = other.interaction) == null ? void 0 : _v.cardPos) && ((_w = this.interaction) == null ? void 0 : _w.refId) === ((_x = other.interaction) == null ? void 0 : _x.refId) && ((_y = this.interaction) == null ? void 0 : _y.signature) === ((_z = other.interaction) == null ? void 0 : _z.signature) && ((_A = this.interaction) == null ? void 0 : _A.lineHeightPx) === ((_B = other.interaction) == null ? void 0 : _B.lineHeightPx) && ((_C = this.interaction) == null ? void 0 : _C.reservedHeightPx) === ((_D = other.interaction) == null ? void 0 : _D.reservedHeightPx);
   }
   ignoreEvent(event) {
     if (this.mode !== "embed") {
@@ -304,38 +990,42 @@ var BlockReferenceWidget = class extends import_view.WidgetType {
     const card = document.createElement("div");
     const usesMeasuredListLayout = ((_a = this.interaction) == null ? void 0 : _a.listMarkerOffsetPx) !== void 0 && ((_b = this.interaction) == null ? void 0 : _b.listContentOffsetPx) !== void 0;
     const preservesListMarker = ((_c = this.interaction) == null ? void 0 : _c.preserveListMarker) === true;
-    card.className = `logseq-block-ref-enhancer-widget logseq-block-embed-widget markdown-rendered${isBlockWidget ? "" : " is-inline-embed"}${isListCard ? " is-list-embed-card" : ""}${usesMeasuredListLayout ? " is-measured-list-embed" : ""}${preservesListMarker ? " is-list-inline-embed" : ""}`;
+    card.className = `block-reference-enhancer-widget block-reference-embed-widget markdown-rendered${isBlockWidget ? "" : " is-inline-embed"}${isListCard ? " is-list-embed-card" : ""}${usesMeasuredListLayout ? " is-measured-list-embed" : ""}${preservesListMarker ? " is-list-inline-embed" : ""}`;
     if (this.interaction) {
-      card.dataset.logseqFrom = String(this.interaction.from);
-      card.dataset.logseqTo = String(this.interaction.to);
-      card.dataset.logseqRevealPos = String(this.interaction.revealPos);
+      card.dataset.blockRefFrom = String(this.interaction.from);
+      card.dataset.blockRefTo = String(this.interaction.to);
+      card.dataset.blockRefRevealPos = String(this.interaction.revealPos);
+      if (this.interaction.stale) {
+        card.addClass("is-stale");
+        card.setAttribute("title", "Source block missing. Showing cached content.");
+      }
       if (this.interaction.refId) {
-        card.dataset.logseqRefId = this.interaction.refId;
+        card.dataset.blockRefId = this.interaction.refId;
       }
       if (this.interaction.availableInlineWidthPx !== void 0) {
-        card.style.setProperty("--logseq-inline-available-width-px", `${this.interaction.availableInlineWidthPx}px`);
+        card.style.setProperty("--block-reference-inline-available-width-px", `${this.interaction.availableInlineWidthPx}px`);
       }
       if (this.interaction.listPrefixColumns !== void 0) {
-        card.style.setProperty("--logseq-list-prefix-columns", `${this.interaction.listPrefixColumns}ch`);
+        card.style.setProperty("--block-reference-list-prefix-columns", `${this.interaction.listPrefixColumns}ch`);
       }
       if (this.interaction.listMarkerOffsetPx !== void 0) {
-        card.style.setProperty("--logseq-list-marker-offset-px", `${this.interaction.listMarkerOffsetPx}px`);
+        card.style.setProperty("--block-reference-list-marker-offset-px", `${this.interaction.listMarkerOffsetPx}px`);
       }
       if (this.interaction.listContentOffsetPx !== void 0) {
-        card.style.setProperty("--logseq-list-content-offset-px", `${this.interaction.listContentOffsetPx}px`);
+        card.style.setProperty("--block-reference-list-content-offset-px", `${this.interaction.listContentOffsetPx}px`);
       }
       if (this.interaction.lineHeightPx !== void 0) {
-        card.style.setProperty("--logseq-line-height-px", `${this.interaction.lineHeightPx}px`);
+        card.style.setProperty("--block-reference-line-height-px", `${this.interaction.lineHeightPx}px`);
       }
     }
     if (this.mode === "embed" && usesMeasuredListLayout && !preservesListMarker) {
       const layout = document.createElement("div");
-      layout.className = "logseq-live-preview-list-embed";
+      layout.className = "block-reference-live-preview-list-embed";
       const marker = document.createElement("span");
-      marker.className = "logseq-live-preview-list-marker";
+      marker.className = "block-reference-live-preview-list-marker";
       marker.setAttribute("aria-hidden", "true");
       const embed = document.createElement("div");
-      embed.className = "logseq-block-embed logseq-live-preview-embed-card";
+      embed.className = "block-reference-embed block-reference-live-preview-embed-card";
       if (this.state === "loading") {
         embed.setText("Loading block...");
         card.addClass("is-loading");
@@ -371,13 +1061,13 @@ var BlockReferenceWidget = class extends import_view.WidgetType {
   createListEmbedSpacer() {
     var _a, _b;
     const spacer = document.createElement("div");
-    spacer.className = "logseq-block-embed-spacer";
+    spacer.className = "block-reference-embed-spacer";
     const reservedHeight = Math.max((_b = (_a = this.interaction) == null ? void 0 : _a.reservedHeightPx) != null ? _b : 0, 0);
     spacer.style.height = `${reservedHeight}px`;
     return spacer;
   }
   toDOM() {
-    var _a, _b, _c;
+    var _a, _b, _c, _d;
     const isBlockWidget = (_b = (_a = this.interaction) == null ? void 0 : _a.blockWidget) != null ? _b : this.mode === "embed";
     const isListCard = ((_c = this.interaction) == null ? void 0 : _c.cardPos) !== void 0;
     if (this.mode === "embed" && isListCard) {
@@ -387,7 +1077,11 @@ var BlockReferenceWidget = class extends import_view.WidgetType {
     if (this.mode === "embed") {
       return this.createEmbedCard(isBlockWidget, false);
     } else {
-      container.className = "logseq-block-ref-enhancer-widget logseq-inline-block-ref";
+      container.className = "block-reference-enhancer-widget block-reference-inline-ref";
+    }
+    if ((_d = this.interaction) == null ? void 0 : _d.stale) {
+      container.addClass("is-stale");
+      container.setAttribute("title", "Source block missing. Showing cached content.");
     }
     if (this.state === "loading") {
       container.setText("Loading...");
@@ -422,9 +1116,9 @@ var blockReferenceField = import_state.StateField.define({
         const signature = interaction == null ? void 0 : interaction.signature;
         if (mode === "embed" && (interaction == null ? void 0 : interaction.cardPos) !== void 0) {
           const source = import_view2.Decoration.replace({
-            logseqRefId: refId,
-            logseqRole: "source",
-            logseqSignature: signature
+            blockRefId: refId,
+            blockRefRole: "source",
+            blockRefSignature: signature
           }).range(from, to);
           const card = import_view2.Decoration.widget({
             widget: new BlockReferenceWidget("loading", mode, void 0, {
@@ -434,12 +1128,12 @@ var blockReferenceField = import_state.StateField.define({
             }),
             block: true,
             side: 1,
-            logseqRefId: refId,
-            logseqRole: "card",
-            logseqSignature: signature
+            blockRefId: refId,
+            blockRefRole: "card",
+            blockRefSignature: signature
           }).range(interaction.cardPos);
           widgets = widgets.update({
-            filter: (aFrom, aTo, value) => value.spec.logseqRefId !== refId && (aTo <= from || aFrom >= to),
+            filter: (aFrom, aTo, value) => value.spec.blockRefId !== refId && (aTo <= from || aFrom >= to),
             add: [source, card],
             sort: true
           });
@@ -449,13 +1143,13 @@ var blockReferenceField = import_state.StateField.define({
         const loading = import_view2.Decoration.replace({
           widget: new BlockReferenceWidget("loading", mode, void 0, interaction ? { ...interaction, refId } : void 0),
           block: isBlockWidget,
-          logseqRefId: refId,
-          logseqRole: "single",
-          logseqSignature: signature
+          blockRefId: refId,
+          blockRefRole: "single",
+          blockRefSignature: signature
         }).range(from, to);
         widgets = widgets.update({
           // 移除与此范围重叠的旧装饰，避免重复
-          filter: (aFrom, aTo, value) => value.spec.logseqRefId !== refId && (aTo <= from || aFrom >= to),
+          filter: (aFrom, aTo, value) => value.spec.blockRefId !== refId && (aTo <= from || aFrom >= to),
           add: [loading]
         });
       } else if (effect.is(setRenderedWidgetEffect)) {
@@ -464,9 +1158,9 @@ var blockReferenceField = import_state.StateField.define({
         const signature = interaction == null ? void 0 : interaction.signature;
         if (mode === "embed" && (interaction == null ? void 0 : interaction.cardPos) !== void 0) {
           const source = import_view2.Decoration.replace({
-            logseqRefId: refId,
-            logseqRole: "source",
-            logseqSignature: signature
+            blockRefId: refId,
+            blockRefRole: "source",
+            blockRefSignature: signature
           }).range(from, to);
           const card = import_view2.Decoration.widget({
             widget: new BlockReferenceWidget("rendered", mode, content, {
@@ -476,12 +1170,12 @@ var blockReferenceField = import_state.StateField.define({
             }),
             block: true,
             side: 1,
-            logseqRefId: refId,
-            logseqRole: "card",
-            logseqSignature: signature
+            blockRefId: refId,
+            blockRefRole: "card",
+            blockRefSignature: signature
           }).range(interaction.cardPos);
           widgets = widgets.update({
-            filter: (aFrom, aTo, value) => value.spec.logseqRefId !== refId && (aTo <= from || aFrom >= to),
+            filter: (aFrom, aTo, value) => value.spec.blockRefId !== refId && (aTo <= from || aFrom >= to),
             add: [source, card],
             sort: true
           });
@@ -491,19 +1185,19 @@ var blockReferenceField = import_state.StateField.define({
         const rendered = import_view2.Decoration.replace({
           widget: new BlockReferenceWidget("rendered", mode, content, interaction ? { ...interaction, refId } : void 0),
           block: isBlockWidget,
-          logseqRefId: refId,
-          logseqRole: "single",
-          logseqSignature: signature
+          blockRefId: refId,
+          blockRefRole: "single",
+          blockRefSignature: signature
         }).range(from, to);
         widgets = widgets.update({
-          filter: (aFrom, aTo, value) => value.spec.logseqRefId !== refId && (aTo <= from || aFrom >= to),
+          filter: (aFrom, aTo, value) => value.spec.blockRefId !== refId && (aTo <= from || aFrom >= to),
           add: [rendered]
         });
       } else if (effect.is(removeWidgetEffect)) {
         const { from, to, refId } = effect.value;
         widgets = widgets.update({
           filter: (aFrom, aTo, value) => {
-            if (refId && value.spec.logseqRefId === refId) {
+            if (refId && value.spec.blockRefId === refId) {
               return false;
             }
             return aTo <= from || aFrom >= to;
@@ -521,10 +1215,10 @@ var blockReferenceField = import_state.StateField.define({
 var import_obsidian3 = require("obsidian");
 var import_state2 = require("@codemirror/state");
 var import_view3 = require("@codemirror/view");
-var EMBED_BLOCK_REF_REGEX = /\{\{embed\s+\(\(([A-Za-z0-9_-]{36,})\)\)\s*\}\}/y;
-var INLINE_BLOCK_REF_REGEX = /\(\(([A-Za-z0-9_-]{36,})\)\)/y;
-var FULLWIDTH_INLINE_BLOCK_REF_REGEX = /（（([A-Za-z0-9_-]{36,})））/y;
-var FENCE_REGEX = /^\s{0,3}(`{3,}|~{3,})/;
+var EMBED_BLOCK_REF_REGEX2 = /\{\{embed\s+\(\(([A-Za-z0-9_-]{36,})\)\)\s*\}\}/y;
+var INLINE_BLOCK_REF_REGEX2 = /\(\(([A-Za-z0-9_-]{36,})\)\)/y;
+var FULLWIDTH_INLINE_BLOCK_REF_REGEX2 = /（（([A-Za-z0-9_-]{36,})））/y;
+var FENCE_REGEX2 = /^\s{0,3}(`{3,}|~{3,})/;
 var LIVE_PREVIEW_SCAN_DEBOUNCE_MS = 200;
 var EMBED_PLACEHOLDER_LINE_HEIGHT_PX = 22;
 var EMBED_PLACEHOLDER_BASE_HEIGHT_PX = 24;
@@ -546,18 +1240,18 @@ function normalizeMeasuredPx(value) {
 }
 function buildTargetSignature(target) {
   var _a, _b, _c, _d, _e, _f;
-  return `${target.from}:${target.to}:${target.mode}:${target.uuid}:${target.blockWidget ? 1 : 0}:${target.preserveListMarker ? 1 : 0}:${normalizeMeasuredPx(target.availableInlineWidthPx)}:${target.renderAsListItem ? 1 : 0}:${(_a = target.indentColumns) != null ? _a : 0}:${normalizeMeasuredPx(target.listMarkerOffsetPx)}:${normalizeMeasuredPx(target.listContentOffsetPx)}:${(_b = target.revealPos) != null ? _b : -1}:${(_c = target.revealFrom) != null ? _c : -1}:${(_d = target.revealTo) != null ? _d : -1}:${(_e = target.cardPos) != null ? _e : -1}:${(_f = target.refId) != null ? _f : ""}:${normalizeMeasuredPx(target.lineHeightPx)}`;
+  return `${target.from}:${target.to}:${target.mode}:${target.uuid}:${target.stale ? 1 : 0}:${target.blockWidget ? 1 : 0}:${target.preserveListMarker ? 1 : 0}:${normalizeMeasuredPx(target.availableInlineWidthPx)}:${target.renderAsListItem ? 1 : 0}:${(_a = target.indentColumns) != null ? _a : 0}:${normalizeMeasuredPx(target.listMarkerOffsetPx)}:${normalizeMeasuredPx(target.listContentOffsetPx)}:${(_b = target.revealPos) != null ? _b : -1}:${(_c = target.revealFrom) != null ? _c : -1}:${(_d = target.revealTo) != null ? _d : -1}:${(_e = target.cardPos) != null ? _e : -1}:${(_f = target.refId) != null ? _f : ""}:${normalizeMeasuredPx(target.lineHeightPx)}`;
 }
 function buildRenderSignature(target) {
   var _a;
-  return `${target.from}:${target.to}:${target.mode}:${target.uuid}:${target.preserveListMarker ? 1 : 0}:${normalizeMeasuredPx(target.availableInlineWidthPx)}:${target.renderAsListItem ? 1 : 0}:${(_a = target.refId) != null ? _a : ""}:${normalizeMeasuredPx(target.listMarkerOffsetPx)}:${normalizeMeasuredPx(target.listContentOffsetPx)}:${normalizeMeasuredPx(target.lineHeightPx)}`;
+  return `${target.from}:${target.to}:${target.mode}:${target.uuid}:${target.stale ? 1 : 0}:${target.preserveListMarker ? 1 : 0}:${normalizeMeasuredPx(target.availableInlineWidthPx)}:${target.renderAsListItem ? 1 : 0}:${(_a = target.refId) != null ? _a : ""}:${normalizeMeasuredPx(target.listMarkerOffsetPx)}:${normalizeMeasuredPx(target.listContentOffsetPx)}:${normalizeMeasuredPx(target.lineHeightPx)}`;
 }
 function getTargetRefId(target) {
   var _a;
   return (_a = target.refId) != null ? _a : `${target.mode}:${target.from}:${target.to}`;
 }
 function getFenceState(line) {
-  const match = line.match(FENCE_REGEX);
+  const match = line.match(FENCE_REGEX2);
   if (!match) {
     return null;
   }
@@ -623,14 +1317,14 @@ function scanLineForTargets(line, lineOffset, targets) {
       index = findInlineCodeSpanEnd(line, index);
       continue;
     }
-    EMBED_BLOCK_REF_REGEX.lastIndex = index;
-    const embedMatch = EMBED_BLOCK_REF_REGEX.exec(line);
+    EMBED_BLOCK_REF_REGEX2.lastIndex = index;
+    const embedMatch = EMBED_BLOCK_REF_REGEX2.exec(line);
     if (embedMatch) {
       index = embedMatch.index + embedMatch[0].length;
       continue;
     }
-    INLINE_BLOCK_REF_REGEX.lastIndex = index;
-    const inlineMatch = INLINE_BLOCK_REF_REGEX.exec(line);
+    INLINE_BLOCK_REF_REGEX2.lastIndex = index;
+    const inlineMatch = INLINE_BLOCK_REF_REGEX2.exec(line);
     if (inlineMatch) {
       targets.push({
         from: lineOffset + inlineMatch.index,
@@ -641,8 +1335,8 @@ function scanLineForTargets(line, lineOffset, targets) {
       index = inlineMatch.index + inlineMatch[0].length;
       continue;
     }
-    FULLWIDTH_INLINE_BLOCK_REF_REGEX.lastIndex = index;
-    const fullwidthMatch = FULLWIDTH_INLINE_BLOCK_REF_REGEX.exec(line);
+    FULLWIDTH_INLINE_BLOCK_REF_REGEX2.lastIndex = index;
+    const fullwidthMatch = FULLWIDTH_INLINE_BLOCK_REF_REGEX2.exec(line);
     if (fullwidthMatch) {
       targets.push({
         from: lineOffset + fullwidthMatch.index,
@@ -707,6 +1401,10 @@ function createAsyncBlockRendererPlugin(plugin) {
         this.component = new import_obsidian3.Component();
         plugin.addChild(this.component);
         this.overlayRoot = this.createOverlayRoot();
+        this.indexUpdatedRef = plugin.indexService.on("index-updated", () => {
+          this.lastScanFingerprint = "";
+          this.scheduleScan();
+        });
         this.scheduleScan();
       }
       update(update) {
@@ -727,17 +1425,18 @@ function createAsyncBlockRendererPlugin(plugin) {
         this.listEmbedLayoutCache.clear();
         this.embedHeightCache.clear();
         this.overlayRoot.remove();
-        this.view.scrollDOM.classList.remove("logseq-overlay-host");
+        this.view.scrollDOM.classList.remove("block-reference-overlay-host");
         if (this.scanDebounceTimer) {
           clearTimeout(this.scanDebounceTimer);
         }
         this.component.unload();
         this.runningRenders.forEach(({ controller }) => controller.abort());
+        plugin.indexService.offref(this.indexUpdatedRef);
       }
       createOverlayRoot() {
-        this.view.scrollDOM.classList.add("logseq-overlay-host");
+        this.view.scrollDOM.classList.add("block-reference-overlay-host");
         const root = document.createElement("div");
-        root.className = "logseq-live-preview-overlay-root";
+        root.className = "block-reference-live-preview-overlay-root";
         this.view.scrollDOM.appendChild(root);
         return root;
       }
@@ -818,6 +1517,7 @@ function createAsyncBlockRendererPlugin(plugin) {
       }
       measureRenderTarget(target) {
         const reservedHeightPx = this.getReservedHeightPx(target);
+        const stale = plugin.indexService.getBlockStatus(target.uuid) === "stale";
         if (target.preserveListMarker) {
           const refId2 = getTargetRefId(target);
           const measuredWidth = this.measureInlineEmbedWidth(target);
@@ -826,10 +1526,15 @@ function createAsyncBlockRendererPlugin(plugin) {
           }
           const inlineWidth = measuredWidth != null ? measuredWidth : this.inlineEmbedWidthCache.get(refId2);
           if (!inlineWidth) {
-            return target;
+            return {
+              ...target,
+              stale,
+              reservedHeightPx
+            };
           }
           return {
             ...target,
+            stale,
             availableInlineWidthPx: inlineWidth.availableWidthPx,
             reservedHeightPx
           };
@@ -837,6 +1542,7 @@ function createAsyncBlockRendererPlugin(plugin) {
         if (!target.renderAsListItem) {
           return {
             ...target,
+            stale,
             reservedHeightPx
           };
         }
@@ -849,11 +1555,13 @@ function createAsyncBlockRendererPlugin(plugin) {
         if (!layout) {
           return {
             ...target,
+            stale,
             reservedHeightPx
           };
         }
         return {
           ...target,
+          stale,
           listMarkerOffsetPx: layout.markerOffsetPx,
           listContentOffsetPx: layout.contentOffsetPx,
           lineHeightPx: layout.lineHeight,
@@ -866,6 +1574,7 @@ function createAsyncBlockRendererPlugin(plugin) {
           from: target.from,
           to: target.to,
           revealPos: (_a = target.revealPos) != null ? _a : target.from,
+          stale: target.stale,
           blockWidget: target.blockWidget,
           preserveListMarker: target.preserveListMarker,
           availableInlineWidthPx: target.availableInlineWidthPx,
@@ -882,7 +1591,7 @@ function createAsyncBlockRendererPlugin(plugin) {
       captureRenderedEmbedHeight(refId) {
         this.view.requestMeasure({
           read: () => {
-            const widget = this.view.scrollDOM.querySelector(`.logseq-block-embed-widget[data-logseq-ref-id="${CSS.escape(refId)}"]`);
+            const widget = this.view.scrollDOM.querySelector(`.block-reference-embed-widget[data-block-ref-id="${CSS.escape(refId)}"]`);
             if (!(widget instanceof HTMLElement)) {
               return null;
             }
@@ -899,12 +1608,12 @@ function createAsyncBlockRendererPlugin(plugin) {
       buildListEmbedCard(target, html) {
         var _a;
         const card = document.createElement("div");
-        card.className = "logseq-block-ref-enhancer-widget logseq-block-embed-widget markdown-rendered is-list-embed-card logseq-live-preview-overlay-card";
-        card.dataset.logseqFrom = String(target.from);
-        card.dataset.logseqTo = String(target.to);
-        card.dataset.logseqRevealPos = String((_a = target.revealPos) != null ? _a : target.from);
-        card.dataset.logseqRefId = getTargetRefId(target);
-        card.innerHTML = `<div class="logseq-live-preview-embed-layout is-list-card"><div class="logseq-block-embed logseq-live-preview-embed-card">${html}</div></div>`;
+        card.className = "block-reference-enhancer-widget block-reference-embed-widget markdown-rendered is-list-embed-card block-reference-live-preview-overlay-card";
+        card.dataset.blockRefFrom = String(target.from);
+        card.dataset.blockRefTo = String(target.to);
+        card.dataset.blockRefRevealPos = String((_a = target.revealPos) != null ? _a : target.from);
+        card.dataset.blockRefId = getTargetRefId(target);
+        card.innerHTML = `<div class="block-reference-live-preview-embed-layout is-list-card"><div class="block-reference-embed block-reference-live-preview-embed-card">${html}</div></div>`;
         this.overlayRoot.appendChild(card);
         return card;
       }
@@ -934,7 +1643,7 @@ function createAsyncBlockRendererPlugin(plugin) {
           return;
         }
         if (existing.state.html !== state.html) {
-          existing.card.innerHTML = `<div class="logseq-live-preview-embed-layout is-list-card"><div class="logseq-block-embed logseq-live-preview-embed-card">${state.html}</div></div>`;
+          existing.card.innerHTML = `<div class="block-reference-live-preview-embed-layout is-list-card"><div class="block-reference-embed block-reference-live-preview-embed-card">${state.html}</div></div>`;
           existing.state = state;
         }
         this.updateListEmbedCardPosition(existing.card, target);
@@ -1019,14 +1728,14 @@ function createAsyncBlockRendererPlugin(plugin) {
         if (!(target instanceof HTMLElement)) {
           return false;
         }
-        const widget = target.closest(".logseq-block-embed-widget");
+        const widget = target.closest(".block-reference-embed-widget");
         if (!(widget instanceof HTMLElement)) {
           return false;
         }
-        const from = Number(widget.dataset.logseqFrom);
-        const to = Number(widget.dataset.logseqTo);
-        const revealPos = Number(widget.dataset.logseqRevealPos);
-        const refId = widget.dataset.logseqRefId;
+        const from = Number(widget.dataset.blockRefFrom);
+        const to = Number(widget.dataset.blockRefTo);
+        const revealPos = Number(widget.dataset.blockRefRevealPos);
+        const refId = widget.dataset.blockRefId;
         if (!Number.isFinite(from) || !Number.isFinite(to) || !Number.isFinite(revealPos)) {
           return false;
         }
@@ -1047,7 +1756,8 @@ function createAsyncBlockRendererPlugin(plugin) {
           selectionFingerprint,
           (_a = this.revealedEmbedPos) != null ? _a : -1,
           this.view.hasFocus ? 1 : 0,
-          contentWidth
+          contentWidth,
+          plugin.indexService.getIndexRevision()
         ].join(":");
         if (scanFingerprint === this.lastScanFingerprint) {
           return;
@@ -1075,8 +1785,8 @@ function createAsyncBlockRendererPlugin(plugin) {
         const removeEffects = [];
         const queuedRemovals = /* @__PURE__ */ new Set();
         currentWidgets.between(0, doc.length, (from, to, decoration) => {
-          const refId = decoration.spec.logseqRefId;
-          const signature = decoration.spec.logseqSignature;
+          const refId = decoration.spec.blockRefId;
+          const signature = decoration.spec.blockRefSignature;
           const target = refId ? activeTargetsByRefId.get(refId) : activeTargets.get(from);
           const shouldKeep = target !== void 0 && signature === buildTargetSignature(target) && (refId !== void 0 || target.to === to);
           if (shouldKeep) {
@@ -1116,7 +1826,8 @@ function createAsyncBlockRendererPlugin(plugin) {
             })
           });
           if (target.mode === "inline") {
-            const summary = (_a = plugin.getInlineReferenceText(target.uuid)) != null ? _a : "[missing block]";
+            const inlineInfo = plugin.getInlineReferenceInfo(target.uuid);
+            const summary = (_a = inlineInfo.text) != null ? _a : "[missing block]";
             if (controller.signal.aborted) {
               return;
             }
@@ -1125,14 +1836,20 @@ function createAsyncBlockRendererPlugin(plugin) {
                 from: target.from,
                 to: target.to,
                 content: summary,
-                mode: "inline"
+                mode: "inline",
+                interaction: {
+                  from: target.from,
+                  to: target.to,
+                  revealPos: target.from,
+                  stale: inlineInfo.stale
+                }
               })
             });
             return;
           }
           const sourcePath = (_c = (_b = this.view.state.field(import_obsidian3.editorInfoField).file) == null ? void 0 : _b.path) != null ? _c : "";
           const embedInnerHtml = await plugin.buildEmbedHtml(target.uuid, sourcePath, this.component);
-          const html = `<div class="logseq-live-preview-embed-layout"><div class="logseq-block-embed logseq-live-preview-embed-card">${embedInnerHtml}</div></div>`;
+          const html = `<div class="block-reference-live-preview-embed-layout"><div class="block-reference-embed block-reference-live-preview-embed-card">${embedInnerHtml}</div></div>`;
           if (controller.signal.aborted) {
             return;
           }
@@ -1148,7 +1865,7 @@ function createAsyncBlockRendererPlugin(plugin) {
           });
           this.captureRenderedEmbedHeight(refId);
         } catch (error) {
-          console.error("Logseq Block Ref Enhancer Error:", error);
+          console.error("Block Reference Enhancer Error:", error);
         } finally {
           const runningTask = this.runningRenders.get(target.from);
           if ((runningTask == null ? void 0 : runningTask.signature) === renderSignature) {
@@ -1167,14 +1884,86 @@ function createAsyncBlockRendererPlugin(plugin) {
   );
 }
 
+// src/ui/StaleBlockReviewModal.ts
+var import_obsidian4 = require("obsidian");
+var StaleBlockReviewModal = class extends import_obsidian4.Modal {
+  constructor(app, plugin) {
+    super(app);
+    this.plugin = plugin;
+    this.ignoredIds = /* @__PURE__ */ new Set();
+  }
+  onOpen() {
+    this.setTitle("Review missing source blocks");
+    this.render();
+  }
+  onClose() {
+    this.contentEl.empty();
+  }
+  render() {
+    this.contentEl.empty();
+    const staleBlocks = this.plugin.indexService.getStaleBlocks().filter((record) => !this.ignoredIds.has(record.id));
+    if (staleBlocks.length === 0) {
+      this.contentEl.createEl("p", {
+        text: "No missing source blocks need review right now."
+      });
+      return;
+    }
+    this.contentEl.createEl("p", {
+      text: `${staleBlocks.length} missing source blocks still have active references.`
+    });
+    for (const staleBlock of staleBlocks) {
+      const summary = staleBlock.block.rawContent.split(/\r?\n/, 1)[0] || "[empty block]";
+      const container = this.contentEl.createDiv({ cls: "block-reference-stale-review-item" });
+      container.createEl("div", {
+        text: summary,
+        cls: "block-reference-stale-review-summary"
+      });
+      container.createEl("div", {
+        text: `${staleBlock.id}`,
+        cls: "block-reference-stale-review-meta"
+      });
+      container.createEl("div", {
+        text: `${staleBlock.block.filePath} | ${staleBlock.references.length} references`,
+        cls: "block-reference-stale-review-meta"
+      });
+      const actionSetting = new import_obsidian4.Setting(container);
+      actionSetting.addButton((button) => {
+        button.setButtonText("Restore recovery page").setCta().onClick(async () => {
+          this.setBusy(container, true);
+          await this.plugin.recoverBlockToRecoveryPage(staleBlock.id);
+          this.render();
+        });
+      }).addButton((button) => {
+        button.setWarning().setButtonText("Confirm deletion").onClick(async () => {
+          const confirmed = window.confirm("Confirm deletion for this missing source block? References will fall back to Missing block.");
+          if (!confirmed) {
+            return;
+          }
+          this.setBusy(container, true);
+          await this.plugin.confirmBlockDeletion(staleBlock.id);
+          this.render();
+        });
+      }).addButton((button) => {
+        button.setButtonText("Ignore for now").onClick(() => {
+          this.ignoredIds.add(staleBlock.id);
+          this.render();
+        });
+      });
+    }
+  }
+  setBusy(container, busy) {
+    container.toggleClass("is-busy", busy);
+  }
+};
+
 // src/main.ts
 var DEFAULT_SETTINGS = {
   // 默认值
 };
 var MAX_INLINE_SUMMARY_LENGTH = 60;
 var STANDALONE_EMBED_REGEX = /^\s*\{\{embed\s+\(\(([A-Za-z0-9_-]{36,})\)\)\s*\}\}\s*$/;
-var MANUAL_RENDER_SCOPE_ATTR = "data-logseq-manual-render";
-var MANAGED_NODE_ATTR = "data-logseq-managed-node";
+var MANUAL_RENDER_SCOPE_ATTR = "data-block-ref-manual-render";
+var MANAGED_NODE_ATTR = "data-block-ref-managed-node";
 var EMBED_PLACEHOLDER_LINE_HEIGHT_PX2 = 22;
 var EMBED_PLACEHOLDER_BASE_HEIGHT_PX2 = 24;
 var EMBED_PLACEHOLDER_MIN_LINES2 = 2;
@@ -1184,7 +1973,7 @@ var SCROLL_ANCHOR_SAMPLE_OFFSETS_PX = [16, 32, 48, 72];
 function createBlockReferenceRegex() {
   return /\{\{embed\s+\(\(([A-Za-z0-9_-]{36,})\)\)\s*\}\}|\(\(([A-Za-z0-9_-]{36,})\)\)|（（([A-Za-z0-9_-]{36,})））/g;
 }
-var ReferencePostProcessChild = class extends import_obsidian4.MarkdownRenderChild {
+var ReferencePostProcessChild = class extends import_obsidian5.MarkdownRenderChild {
   constructor(containerEl, plugin, sourcePath) {
     super(containerEl);
     this.plugin = plugin;
@@ -1199,61 +1988,84 @@ var ReferencePostProcessChild = class extends import_obsidian4.MarkdownRenderChi
     this.plugin.detachReadingModeRenderQueue(this.readingModeQueueRoot);
   }
 };
-var LogseqBlockRefEnhancer = class extends import_obsidian4.Plugin {
+var BlockReferenceEnhancer = class extends import_obsidian5.Plugin {
   constructor() {
     super(...arguments);
     this.readingModeRenderQueues = /* @__PURE__ */ new Map();
+    this.statusBarEl = null;
+    this.lastKnownIndexStats = null;
+    this.startupFullRebuildPending = false;
   }
   async onload() {
     await this.loadSettings();
     this.indexService = new IndexService(this.app, this.manifest.dir);
+    this.statusBarEl = this.addStatusBarItem();
+    this.setIndexStatusMessage("Block index: loading cache...");
     this.addCommand({
       id: "rebuild-logseq-block-index",
       name: "Rebuild block reference index",
-      callback: () => {
-        this.indexService.buildIndex();
+      callback: async () => {
+        await this.rebuildBlockReferenceIndex();
       }
     });
     this.addCommand({
       id: "copy-logseq-block-reference",
-      name: "Copy current block's Logseq reference",
+      name: "Copy current block reference",
       editorCallback: (editor, view) => {
         this.handleCopyBlockReference(editor, view);
       }
     });
+    this.addCommand({
+      id: "review-missing-source-blocks",
+      name: "Review missing source blocks",
+      callback: () => {
+        this.openStaleBlockReview();
+      }
+    });
     this.app.workspace.onLayoutReady(async () => {
-      await this.indexService.initialize();
+      this.registerEvent(this.indexService.on("index-updated", () => {
+        this.refreshOpenMarkdownViews();
+      }));
+      await this.indexService.initialize({
+        onProgress: (progress) => {
+          this.updateIndexProgress(progress);
+        },
+        onStatus: (status) => {
+          this.handleIndexStatus(status);
+        }
+      });
       this.registerMarkdownPostProcessor(this.readingModeRenderer.bind(this));
       const asyncPlugin = createAsyncBlockRendererPlugin(this);
       this.registerEditorExtension([blockReferenceField, asyncPlugin]);
       this.registerEditorSuggest(new BlockSuggest(this.app, this.indexService));
       this.setupFileEvents();
+      this.refreshOpenMarkdownViews();
     });
   }
   setupFileEvents() {
     this.registerEvent(this.app.vault.on("create", (file) => {
-      if (file instanceof import_obsidian4.TFile && file.extension === "md") {
-        this.indexService.processFileChange(file);
+      if (file instanceof import_obsidian5.TFile && file.extension === "md") {
+        void this.indexService.processFileChange(file);
       }
     }));
     this.registerEvent(this.app.vault.on("modify", (file) => {
-      if (file instanceof import_obsidian4.TFile && file.extension === "md") {
-        this.indexService.processFileChange(file);
+      if (file instanceof import_obsidian5.TFile && file.extension === "md") {
+        void this.indexService.processFileChange(file);
       }
     }));
     this.registerEvent(this.app.vault.on("delete", (file) => {
-      if (file instanceof import_obsidian4.TFile && file.extension === "md") {
-        this.indexService.processFileDelete(file.path);
+      if (file instanceof import_obsidian5.TFile && file.extension === "md") {
+        void this.indexService.processFileDelete(file.path);
       }
     }));
     this.registerEvent(this.app.vault.on("rename", (file, oldPath) => {
-      if (file instanceof import_obsidian4.TFile && file.extension === "md") {
-        this.indexService.processFileRename(oldPath, file.path);
+      if (file instanceof import_obsidian5.TFile && file.extension === "md") {
+        void this.indexService.processFileRename(oldPath, file.path);
       }
     }));
   }
   onunload() {
-    console.log("Unloading Logseq Block Ref Enhancer plugin.");
+    console.log("Unloading Block Reference Enhancer plugin.");
   }
   async loadSettings() {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
@@ -1270,7 +2082,7 @@ var LogseqBlockRefEnhancer = class extends import_obsidian4.Plugin {
     const lineContent = editor.getLine(line);
     const blockMatch = lineContent.match(/^\s*-\s(.+)/);
     if (!blockMatch) {
-      new import_obsidian4.Notice("This line is not a valid Logseq block.");
+      new import_obsidian5.Notice("This line is not a valid source block.");
       return;
     }
     let existingBlock = this.indexService.findBlockByFileAndLine(file.path, line);
@@ -1289,34 +2101,41 @@ ${indentation}  id:: ${blockId}`;
         rawContent: blockMatch[1],
         childrenMarkdown: "",
         startLine: line,
+        endLine: line,
         childrenIDs: []
       });
     }
     navigator.clipboard.writeText(`((${blockId}))`);
-    new import_obsidian4.Notice("Block reference copied to clipboard!");
+    new import_obsidian5.Notice("Block reference copied to clipboard!");
   }
   getInlineReferenceText(uuid) {
-    return this.getInlineReferenceTextInternal(uuid, /* @__PURE__ */ new Set());
+    return this.getInlineReferenceInfo(uuid).text;
   }
-  getInlineReferenceTextInternal(uuid, visited) {
+  getInlineReferenceInfo(uuid) {
+    return this.getInlineReferenceInfoInternal(uuid, /* @__PURE__ */ new Set());
+  }
+  getInlineReferenceInfoInternal(uuid, visited) {
     var _a;
     if (visited.has(uuid)) {
-      return "[cyclic block]";
+      return { text: "[cyclic block]", stale: false };
     }
     const block = this.indexService.getBlock(uuid);
     if (!block) {
-      return null;
+      return { text: null, stale: false };
     }
     const nextVisited = new Set(visited);
     nextVisited.add(uuid);
     const firstLine = (_a = block.rawContent.split(/\r?\n/, 1)[0]) != null ? _a : "";
     const expandedLine = firstLine.replace(/(?:\(\(|\uFF08\uFF08)([A-Za-z0-9_-]{36,})(?:\)\)|\uFF09\uFF09)/g, (_match, nestedUuid) => {
       var _a2;
-      return (_a2 = this.getInlineReferenceTextInternal(nestedUuid, nextVisited)) != null ? _a2 : "[missing block]";
+      return (_a2 = this.getInlineReferenceInfoInternal(nestedUuid, nextVisited).text) != null ? _a2 : "[missing block]";
     });
     const plainText = expandedLine.replace(/!\[\[([^\]]+)\]\]/g, "$1").replace(/\[\[([^\]|]+)\|([^\]]+)\]\]/g, "$2").replace(/\[\[([^\]]+)\]\]/g, "$1").replace(/\[([^\]]+)\]\([^)]+\)/g, "$1").replace(/^#{1,6}\s+/g, "").replace(/[*_~`]/g, "").replace(/\s+/g, " ").trim();
     const summary = plainText || "[empty block]";
-    return summary.length > MAX_INLINE_SUMMARY_LENGTH ? `${summary.slice(0, MAX_INLINE_SUMMARY_LENGTH).trimEnd()}\u2026` : summary;
+    return {
+      text: summary.length > MAX_INLINE_SUMMARY_LENGTH ? `${summary.slice(0, MAX_INLINE_SUMMARY_LENGTH).trimEnd()}\u2026` : summary,
+      stale: block.status === "stale"
+    };
   }
   async buildEmbedHtml(uuid, sourcePath, component) {
     const host = document.createElement("div");
@@ -1563,9 +2382,13 @@ ${indentation}  id:: ${blockId}`;
   markManualRenderScope(element) {
     element.setAttribute(MANUAL_RENDER_SCOPE_ATTR, "true");
   }
-  createInlineReferenceElement(summary) {
+  createInlineReferenceElement(summary, stale) {
     const inlineRef = document.createElement("span");
-    inlineRef.addClass("logseq-inline-block-ref");
+    inlineRef.addClass("block-reference-inline-ref");
+    if (stale) {
+      inlineRef.addClass("is-stale");
+      inlineRef.setAttribute("title", "Source block missing. Showing cached content.");
+    }
     inlineRef.setAttribute(MANAGED_NODE_ATTR, "true");
     inlineRef.setText(summary);
     return inlineRef;
@@ -1588,24 +2411,25 @@ ${indentation}  id:: ${blockId}`;
   }
   prepareEmbedContainer(container, uuid) {
     container.empty();
-    container.removeClass("logseq-block-ref-enhancer-error");
-    container.addClass("logseq-block-embed", "is-loading");
+    container.removeClass("block-reference-enhancer-error");
+    container.removeClass("is-stale");
+    container.addClass("block-reference-embed", "is-loading");
     container.setAttribute(MANAGED_NODE_ATTR, "true");
     this.markManualRenderScope(container);
     const placeholderHeight = this.estimateEmbedPlaceholderHeight(uuid);
     if (placeholderHeight !== null) {
-      container.style.setProperty("--logseq-embed-placeholder-height", `${placeholderHeight}px`);
+      container.style.setProperty("--block-reference-embed-placeholder-height", `${placeholderHeight}px`);
     } else {
-      container.style.removeProperty("--logseq-embed-placeholder-height");
+      container.style.removeProperty("--block-reference-embed-placeholder-height");
     }
     const placeholder = document.createElement("div");
-    placeholder.addClass("logseq-block-embed-placeholder");
+    placeholder.addClass("block-reference-embed-placeholder");
     container.appendChild(placeholder);
   }
   finalizeEmbedContainer(container, contentNodes) {
     container.replaceChildren(...contentNodes);
     container.removeClass("is-loading");
-    container.style.removeProperty("--logseq-embed-placeholder-height");
+    container.style.removeProperty("--block-reference-embed-placeholder-height");
   }
   shouldSkipTextNode(node, root) {
     const parentElement = node.parentElement;
@@ -1623,7 +2447,7 @@ ${indentation}  id:: ${blockId}`;
       return;
     }
     this.markManualRenderScope(container);
-    await import_obsidian4.MarkdownRenderer.render(this.app, markdown, container, sourcePath, component);
+    await import_obsidian5.MarkdownRenderer.render(this.app, markdown, container, sourcePath, component);
     await this.processRenderedReferences(container, sourcePath, component, visitedEmbeds);
   }
   async populateEmbedContainer(container, uuid, sourcePath, component, visitedEmbeds) {
@@ -1632,7 +2456,7 @@ ${indentation}  id:: ${blockId}`;
     if (visitedEmbeds.has(uuid)) {
       container.empty();
       container.removeClass("is-loading");
-      container.addClass("logseq-block-ref-enhancer-error");
+      container.addClass("block-reference-enhancer-error");
       container.setText("Cyclic embed");
       return;
     }
@@ -1640,20 +2464,28 @@ ${indentation}  id:: ${blockId}`;
     if (!block) {
       container.empty();
       container.removeClass("is-loading");
-      container.addClass("logseq-block-ref-enhancer-error");
+      container.addClass("block-reference-enhancer-error");
       container.setText("Missing block");
       return;
     }
     const nextVisitedEmbeds = new Set(visitedEmbeds);
     nextVisitedEmbeds.add(uuid);
+    const contentNodes = [];
+    if (block.status === "stale") {
+      container.addClass("is-stale");
+      const warning = document.createElement("div");
+      warning.addClass("block-reference-enhancer-warning");
+      warning.setText("Source block missing. Showing cached content.");
+      contentNodes.push(warning);
+    }
     const rootContainer = document.createElement("div");
-    rootContainer.addClass("logseq-block-embed-root");
+    rootContainer.addClass("block-reference-embed-root");
     await this.renderMarkdownAndProcess(rootContainer, block.rawContent, sourcePath, component, nextVisitedEmbeds);
-    const contentNodes = [rootContainer];
+    contentNodes.push(rootContainer);
     const childMarkdown = (_a = block.childrenMarkdown) == null ? void 0 : _a.trim();
     if (childMarkdown) {
       const childrenContainer = document.createElement("div");
-      childrenContainer.addClass("logseq-block-embed-children");
+      childrenContainer.addClass("block-reference-embed-children");
       await this.renderMarkdownAndProcess(childrenContainer, childMarkdown, sourcePath, component, nextVisitedEmbeds);
       contentNodes.push(childrenContainer);
     }
@@ -1718,8 +2550,9 @@ ${indentation}  id:: ${blockId}`;
         if (embedUuid) {
           fragment.appendChild(document.createTextNode(placeholder));
         } else {
-          const summary = (_c = this.getInlineReferenceText(inlineUuid)) != null ? _c : "[missing block]";
-          fragment.appendChild(this.createInlineReferenceElement(summary));
+          const inlineInfo = this.getInlineReferenceInfo(inlineUuid);
+          const summary = (_c = inlineInfo.text) != null ? _c : "[missing block]";
+          fragment.appendChild(this.createInlineReferenceElement(summary, inlineInfo.stale));
           replacedInline = true;
         }
         lastIndex = start + placeholder.length;
@@ -1741,5 +2574,112 @@ ${indentation}  id:: ${blockId}`;
       return;
     }
     context.addChild(new ReferencePostProcessChild(element, this, context.sourcePath));
+  }
+  async recoverBlockToRecoveryPage(id) {
+    const recoveryFile = await this.indexService.recoverBlockToRecoveryPage(id);
+    if (!recoveryFile) {
+      new import_obsidian5.Notice("Unable to recover source block to the recovery page.");
+      return;
+    }
+    new import_obsidian5.Notice(`Recovered source block to ${recoveryFile.path}.`);
+  }
+  async confirmBlockDeletion(id) {
+    await this.indexService.confirmBlockDeletion(id);
+    new import_obsidian5.Notice("Confirmed missing source block deletion.");
+  }
+  openStaleBlockReview() {
+    new StaleBlockReviewModal(this.app, this).open();
+  }
+  async rebuildBlockReferenceIndex() {
+    new import_obsidian5.Notice("Building block index...");
+    try {
+      const stats = await this.indexService.rebuildIndex({
+        phase: "rebuild",
+        onProgress: (progress) => {
+          this.updateIndexProgress(progress);
+        }
+      });
+      this.setIndexReadyStatus(stats);
+      new import_obsidian5.Notice(`Block index rebuilt: ${stats.fileCount} files, ${stats.blockCount} blocks, ${stats.referenceCount} references.`);
+    } catch (error) {
+      this.setIndexStatusMessage("Block index: rebuild failed");
+      console.error("Failed to rebuild block index:", error);
+      new import_obsidian5.Notice("Failed to rebuild block index.");
+    }
+  }
+  updateIndexProgress(progress) {
+    const phaseLabel = progress.phase === "rebuild" ? "building" : progress.phase === "reconcile" ? "reconciling" : "loading cache";
+    if (progress.totalFiles <= 0) {
+      this.setIndexStatusMessage(`Block index: ${phaseLabel}...`);
+      return;
+    }
+    this.setIndexStatusMessage(
+      `Block index: ${phaseLabel} ${progress.processedFiles}/${progress.totalFiles} files | ${progress.blockCount} blocks | ${progress.referenceCount} refs`
+    );
+  }
+  handleIndexStatus(status) {
+    var _a, _b, _c, _d;
+    if (status.stats) {
+      this.lastKnownIndexStats = status.stats;
+    }
+    switch (status.state) {
+      case "loading-cache":
+        this.setIndexStatusMessage("Block index: loading cache...");
+        return;
+      case "cache-missing":
+        this.startupFullRebuildPending = true;
+        this.setIndexStatusMessage("Block index: no cache found, building full index...");
+        new import_obsidian5.Notice("No cached block index found. Building a new index...");
+        return;
+      case "cache-loaded":
+        this.setIndexStatusMessage(
+          this.buildStatusText("Block index: cache loaded, checking vault changes...", status.stats)
+        );
+        return;
+      case "reconcile-start":
+        if (((_a = status.totalWork) != null ? _a : 0) > 0) {
+          this.setIndexStatusMessage(
+            `Block index: reconciling 0/${status.totalWork} files | ${(_b = status.changedFiles) != null ? _b : 0} changed | ${(_c = status.removedFiles) != null ? _c : 0} removed`
+          );
+          return;
+        }
+        this.setIndexStatusMessage("Block index: checking vault changes...");
+        return;
+      case "ready":
+        this.setIndexReadyStatus((_d = status.stats) != null ? _d : this.lastKnownIndexStats);
+        if (this.startupFullRebuildPending && status.source === "rebuild" && status.stats) {
+          new import_obsidian5.Notice(`Initial block index build complete: ${status.stats.fileCount} files, ${status.stats.blockCount} blocks, ${status.stats.referenceCount} references.`);
+        }
+        this.startupFullRebuildPending = false;
+        return;
+    }
+  }
+  setIndexReadyStatus(stats) {
+    this.lastKnownIndexStats = stats != null ? stats : this.lastKnownIndexStats;
+    this.setIndexStatusMessage(this.buildStatusText("Block index: ready", this.lastKnownIndexStats));
+  }
+  buildStatusText(prefix, stats) {
+    if (!stats) {
+      return prefix;
+    }
+    return `${prefix} | ${stats.fileCount} files | ${stats.blockCount} blocks | ${stats.referenceCount} refs`;
+  }
+  setIndexStatusMessage(message) {
+    if (!this.statusBarEl) {
+      return;
+    }
+    this.statusBarEl.style.display = "";
+    this.statusBarEl.setText(message);
+  }
+  refreshOpenMarkdownViews() {
+    this.app.workspace.iterateAllLeaves((leaf) => {
+      const view = leaf.view;
+      if (!(view instanceof import_obsidian5.MarkdownView)) {
+        return;
+      }
+      if (view.getMode() === "preview") {
+        view.previewMode.rerender(true);
+      }
+    });
   }
 };

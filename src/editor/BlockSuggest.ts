@@ -36,7 +36,7 @@ export class BlockSuggest extends EditorSuggest<SuggestionItem> {
 
     renderSuggestion(item: SuggestionItem, el: HTMLElement): void {
         el.createEl('div', { text: item.block.rawContent.substring(0, 100) });
-        el.createEl('small', { text: item.block.filePath, cls: 'logseq-suggest-filepath' });
+        el.createEl('small', { text: item.block.filePath, cls: 'block-reference-suggest-filepath' });
     }
 
     selectSuggestion(item: SuggestionItem, evt: MouseEvent | KeyboardEvent): void {

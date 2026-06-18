@@ -1,4 +1,4 @@
-# Obsidian Logseq Block Enhancer
+# Block Reference Enhancer
 
 [English README](./README.en.md)
 
@@ -9,12 +9,13 @@
 <img alt="图片" src="https://github.com/user-attachments/assets/bb31f1bf-5c23-4e5d-b3f3-014b64147b9f" />
 
 
-在 Obsidian 中查看 Logseq 风格块引用与块嵌入的插件。
+在 Obsidian 中渲染基于 UUID 语法的块引用与块嵌入，并兼容 Logseq 常见的大纲块写法。
 
 当前版本的定位更接近一个“查看器”：
 - 普通块引用 `((uuid))` 会在 Reading Mode 和 Live Preview 中显示为行内摘要。
 - 块嵌入 `{{embed ((uuid))}}` 会在 Reading Mode 和 Live Preview 中显示完整块内容与子级。
 - 原始 Markdown 不会被改写。
+- 插件会维护自己的一份块索引，不依赖 Obsidian 自带搜索索引。
 
 ## 当前可以做什么
 
@@ -25,8 +26,11 @@
   - 普通块引用 `((uuid))` 的行内摘要
   - 块嵌入 `{{embed ((uuid))}}` 的完整渲染内容
 - 在编辑器中输入 `((` 使用块自动补全
-- 使用命令复制当前块的 Logseq 块引用
+- 使用命令复制当前块引用
 - 自动扫描库内 Markdown 文件，建立索引并使用本地缓存
+- 支持命令手动重建块索引
+- 当源块丢失但引用还存在时，使用最后缓存内容继续显示
+- 支持审查缺失源块并恢复到恢复页
 
 ## 当前达到的效果
 
@@ -44,16 +48,25 @@
 1. 打开你的 Obsidian 库目录
 2. 进入 `.obsidian/plugins/`
 3. 新建一个文件夹，名字使用插件 ID：`logseq-block-ref-enhancer`
+   当前插件 ID 仍保留旧值以兼容现有安装和本地数据
 4. 将仓库中的这三个文件复制进去：
    - `main.js`
    - `manifest.json`
    - `styles.css`
 5. 回到 Obsidian，打开“设置” -> “第三方插件”
-6. 打开 `Logseq Block Ref Enhancer`
+6. 打开 `Block Reference Enhancer`
 
 启用后就可以直接查看：
 - `((uuid))`
 - `{{embed ((uuid))}}`
+
+插件启用后会自动建立索引：
+- 首次完整建索引时会在状态栏显示进度
+- 如果已经有缓存，启动时状态栏也会显示 `loading cache`、`checking vault changes`、`reconciling`、`ready` 这类阶段状态
+- 后续 Markdown 文件增删改重命名会静默增量更新
+- 索引完成后，状态栏会保留当前 `ready` 统计信息，方便确认插件已经完成启动期索引
+- 如果你在 Obsidian 之外通过 Logseq、同步工具、外部编辑器或 git 大量改动了文件，建议手动重建一次索引
+- 如果本地缓存文件不存在，插件启动时会提示正在建立新的完整索引
 
 ## 常用功能
 
@@ -81,7 +94,7 @@
 
 将光标放到一个无序列表块上，打开命令面板并执行：
 
-`Copy current block's Logseq reference`
+`Copy current block reference`
 
 如果当前块还没有 `id:: uuid`，插件会自动补上，再把 `((uuid))` 复制到剪贴板。
 
@@ -94,6 +107,39 @@
 ```
 
 会触发块搜索和自动补全。
+
+### 5. 手动重建块索引
+
+打开命令面板并执行：
+
+`Rebuild block reference index`
+
+适合这些情况：
+- 你在插件关闭期间，通过 Logseq、同步工具、外部编辑器或 git 大量改动了 Markdown 文件
+- 你在大库里看到部分 `((uuid))` 显示为 `[missing block]`
+- 你看到块嵌入显示为 `Missing block`
+
+执行时：
+- 状态栏会显示索引进度
+- 完成后会弹出文件数、块数、引用数的结果提示
+
+### 6. 审查缺失源块
+
+打开命令面板并执行：
+
+`Review missing source blocks`
+
+当一个带 `id:: uuid` 的源块消失，但库里还有引用时：
+- 行内引用会显示最后缓存摘要，并标记这是缓存内容
+- 块嵌入会显示最后缓存的完整内容，并提示源块缺失
+- 你可以在审查窗口里：
+  - 恢复到恢复页
+  - 确认删除
+  - 暂时忽略
+
+默认恢复页路径：
+
+`pages/Block Recovery.md`
 
 ## 开发
 
@@ -109,8 +155,9 @@ npm run build
 
 ## 已知情况
 
-- 这个插件现在更偏向“Logseq 语法查看器”，而不是完整的 Logseq 编辑体验
+- 这个插件目前更偏向 UUID 块引用与块嵌入增强器，而不是完整的 Logseq 编辑体验
 - Live Preview 下，复杂列表、较长嵌入内容、不同主题样式之间，仍可能存在少量视觉差异
+- 当前恢复策略固定为恢复到 recovery page，不默认尝试按原文件和原行号插回源块
 
 ## 路线图
 

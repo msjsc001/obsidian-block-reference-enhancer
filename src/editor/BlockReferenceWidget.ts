@@ -5,6 +5,7 @@ export interface BlockWidgetInteraction {
     from: number;
     to: number;
     revealPos: number;
+    stale?: boolean;
     blockWidget?: boolean;
     preserveListMarker?: boolean;
     availableInlineWidthPx?: number;
@@ -40,6 +41,7 @@ export class BlockReferenceWidget extends WidgetType {
             && this.interaction?.from === other.interaction?.from
             && this.interaction?.to === other.interaction?.to
             && this.interaction?.revealPos === other.interaction?.revealPos
+            && this.interaction?.stale === other.interaction?.stale
             && this.interaction?.blockWidget === other.interaction?.blockWidget
             && this.interaction?.preserveListMarker === other.interaction?.preserveListMarker
             && this.interaction?.availableInlineWidthPx === other.interaction?.availableInlineWidthPx
@@ -66,48 +68,52 @@ export class BlockReferenceWidget extends WidgetType {
         const usesMeasuredListLayout = this.interaction?.listMarkerOffsetPx !== undefined
             && this.interaction?.listContentOffsetPx !== undefined;
         const preservesListMarker = this.interaction?.preserveListMarker === true;
-        card.className = `logseq-block-ref-enhancer-widget logseq-block-embed-widget markdown-rendered${isBlockWidget ? "" : " is-inline-embed"}${isListCard ? " is-list-embed-card" : ""}${usesMeasuredListLayout ? " is-measured-list-embed" : ""}${preservesListMarker ? " is-list-inline-embed" : ""}`;
+        card.className = `block-reference-enhancer-widget block-reference-embed-widget markdown-rendered${isBlockWidget ? "" : " is-inline-embed"}${isListCard ? " is-list-embed-card" : ""}${usesMeasuredListLayout ? " is-measured-list-embed" : ""}${preservesListMarker ? " is-list-inline-embed" : ""}`;
 
         if (this.interaction) {
-            card.dataset.logseqFrom = String(this.interaction.from);
-            card.dataset.logseqTo = String(this.interaction.to);
-            card.dataset.logseqRevealPos = String(this.interaction.revealPos);
+            card.dataset.blockRefFrom = String(this.interaction.from);
+            card.dataset.blockRefTo = String(this.interaction.to);
+            card.dataset.blockRefRevealPos = String(this.interaction.revealPos);
+            if (this.interaction.stale) {
+                card.addClass("is-stale");
+                card.setAttribute("title", "Source block missing. Showing cached content.");
+            }
 
             if (this.interaction.refId) {
-                card.dataset.logseqRefId = this.interaction.refId;
+                card.dataset.blockRefId = this.interaction.refId;
             }
 
             if (this.interaction.availableInlineWidthPx !== undefined) {
-                card.style.setProperty("--logseq-inline-available-width-px", `${this.interaction.availableInlineWidthPx}px`);
+                card.style.setProperty("--block-reference-inline-available-width-px", `${this.interaction.availableInlineWidthPx}px`);
             }
 
             if (this.interaction.listPrefixColumns !== undefined) {
-                card.style.setProperty("--logseq-list-prefix-columns", `${this.interaction.listPrefixColumns}ch`);
+                card.style.setProperty("--block-reference-list-prefix-columns", `${this.interaction.listPrefixColumns}ch`);
             }
 
             if (this.interaction.listMarkerOffsetPx !== undefined) {
-                card.style.setProperty("--logseq-list-marker-offset-px", `${this.interaction.listMarkerOffsetPx}px`);
+                card.style.setProperty("--block-reference-list-marker-offset-px", `${this.interaction.listMarkerOffsetPx}px`);
             }
 
             if (this.interaction.listContentOffsetPx !== undefined) {
-                card.style.setProperty("--logseq-list-content-offset-px", `${this.interaction.listContentOffsetPx}px`);
+                card.style.setProperty("--block-reference-list-content-offset-px", `${this.interaction.listContentOffsetPx}px`);
             }
 
             if (this.interaction.lineHeightPx !== undefined) {
-                card.style.setProperty("--logseq-line-height-px", `${this.interaction.lineHeightPx}px`);
+                card.style.setProperty("--block-reference-line-height-px", `${this.interaction.lineHeightPx}px`);
             }
         }
 
         if (this.mode === "embed" && usesMeasuredListLayout && !preservesListMarker) {
             const layout = document.createElement("div");
-            layout.className = "logseq-live-preview-list-embed";
+            layout.className = "block-reference-live-preview-list-embed";
 
             const marker = document.createElement("span");
-            marker.className = "logseq-live-preview-list-marker";
+            marker.className = "block-reference-live-preview-list-marker";
             marker.setAttribute("aria-hidden", "true");
 
             const embed = document.createElement("div");
-            embed.className = "logseq-block-embed logseq-live-preview-embed-card";
+            embed.className = "block-reference-embed block-reference-live-preview-embed-card";
 
             if (this.state === "loading") {
                 embed.setText("Loading block...");
@@ -147,7 +153,7 @@ export class BlockReferenceWidget extends WidgetType {
 
     private createListEmbedSpacer(): HTMLElement {
         const spacer = document.createElement("div");
-        spacer.className = "logseq-block-embed-spacer";
+        spacer.className = "block-reference-embed-spacer";
         const reservedHeight = Math.max(this.interaction?.reservedHeightPx ?? 0, 0);
         spacer.style.height = `${reservedHeight}px`;
         return spacer;
@@ -166,7 +172,12 @@ export class BlockReferenceWidget extends WidgetType {
         if (this.mode === "embed") {
             return this.createEmbedCard(isBlockWidget, false);
         } else {
-            container.className = "logseq-block-ref-enhancer-widget logseq-inline-block-ref";
+            container.className = "block-reference-enhancer-widget block-reference-inline-ref";
+        }
+
+        if (this.interaction?.stale) {
+            container.addClass("is-stale");
+            container.setAttribute("title", "Source block missing. Showing cached content.");
         }
 
         if (this.state === "loading") {

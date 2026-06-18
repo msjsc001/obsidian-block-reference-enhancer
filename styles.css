@@ -1,4 +1,4 @@
-.logseq-block-embed {
+.block-reference-embed {
     border: 1px solid var(--background-modifier-border);
     background-color: var(--background-secondary);
     padding: 0.5em 1em;
@@ -8,29 +8,29 @@
     overflow-anchor: none;
 }
 
-.logseq-block-embed.is-loading {
-    min-height: var(--logseq-embed-placeholder-height, 72px);
+.block-reference-embed.is-loading {
+    min-height: var(--block-reference-embed-placeholder-height, 72px);
 }
 
-.logseq-block-embed-placeholder {
+.block-reference-embed-placeholder {
     min-height: inherit;
 }
 
-.logseq-block-embed-root > :first-child,
-.logseq-block-embed-children > :first-child {
+.block-reference-embed-root > :first-child,
+.block-reference-embed-children > :first-child {
     margin-top: 0;
 }
 
-.logseq-block-embed-root > :last-child,
-.logseq-block-embed-children > :last-child {
+.block-reference-embed-root > :last-child,
+.block-reference-embed-children > :last-child {
     margin-bottom: 0;
 }
 
-.logseq-block-embed-children {
+.block-reference-embed-children {
     margin-top: 0.35em;
 }
 
-.logseq-inline-block-ref {
+.block-reference-inline-ref {
     display: inline;
     padding: 0 0.25em;
     border: 1px solid var(--background-modifier-border);
@@ -40,96 +40,112 @@
     white-space: normal;
 }
 
+.block-reference-inline-ref.is-stale {
+    border-style: dashed;
+    border-color: var(--color-orange, var(--text-accent));
+    background-color: var(--background-modifier-hover);
+}
+
 /*
  * 最终修复: 覆盖主题或核心样式中可能存在的 :before/:after 伪元素。
  * 某些主题会给通用的 widget 或 embed 块添加图标或“把手”，
  * 这会导致显示一个损坏的图片。我们用 `content: none !important;`
  * 强制移除它们，确保我们的组件内部纯净。
 */
-.logseq-block-ref-enhancer-widget::before,
-.logseq-block-ref-enhancer-widget::after,
-.logseq-inline-block-ref::before,
-.logseq-inline-block-ref::after,
-.logseq-block-embed::before,
-.logseq-block-embed::after {
+.block-reference-enhancer-widget::before,
+.block-reference-enhancer-widget::after,
+.block-reference-inline-ref::before,
+.block-reference-inline-ref::after,
+.block-reference-embed::before,
+.block-reference-embed::after {
     content: none !important;
 }
 
-.logseq-block-ref-enhancer-error {
+.block-reference-enhancer-error {
     color: var(--text-error);
     font-family: var(--font-monospace);
 }
 
+.block-reference-enhancer-warning {
+    margin-bottom: 0.5em;
+    color: var(--text-muted);
+    font-size: 0.9em;
+}
+
+.block-reference-embed.is-stale {
+    border-style: dashed;
+}
+
 /* Live Preview 排版基线适配：在编辑器上下文中让块与阅读模式一致 */
-.markdown-source-view.mod-cm6 .cm-content .logseq-block-embed {
+.markdown-source-view.mod-cm6 .cm-content .block-reference-embed {
     font-family: var(--font-text);
     white-space: normal;
     box-sizing: border-box;
 }
 
-.markdown-source-view.mod-cm6 .cm-content .logseq-block-embed-widget {
+.markdown-source-view.mod-cm6 .cm-content .block-reference-embed-widget {
     box-sizing: border-box;
 }
 
-.markdown-source-view.mod-cm6 .cm-content .logseq-block-embed-widget:not(.is-inline-embed) {
+.markdown-source-view.mod-cm6 .cm-content .block-reference-embed-widget:not(.is-inline-embed) {
     display: block;
     width: 100%;
 }
 
-.markdown-source-view.mod-cm6 .cm-content .logseq-block-embed-widget.is-inline-embed {
+.markdown-source-view.mod-cm6 .cm-content .block-reference-embed-widget.is-inline-embed {
     display: inline-block;
     vertical-align: top;
     white-space: normal;
 }
 
-.markdown-source-view.mod-cm6 .cm-content .logseq-block-embed-widget.is-inline-embed.is-list-inline-embed {
+.markdown-source-view.mod-cm6 .cm-content .block-reference-embed-widget.is-inline-embed.is-list-inline-embed {
     width: auto;
     max-width: 100%;
     min-width: 0;
-    max-inline-size: var(--logseq-inline-available-width-px, 100%);
+    max-inline-size: var(--block-reference-inline-available-width-px, 100%);
 }
 
-.markdown-source-view.mod-cm6 .cm-content .logseq-block-embed-widget.is-inline-embed.is-list-inline-embed .logseq-live-preview-embed-layout {
+.markdown-source-view.mod-cm6 .cm-content .block-reference-embed-widget.is-inline-embed.is-list-inline-embed .block-reference-live-preview-embed-layout {
     display: inline-block;
     width: auto;
     max-width: 100%;
     min-width: 0;
-    max-inline-size: var(--logseq-inline-available-width-px, 100%);
+    max-inline-size: var(--block-reference-inline-available-width-px, 100%);
     vertical-align: top;
 }
 
-.markdown-source-view.mod-cm6 .cm-content .logseq-block-embed-widget.is-inline-embed.is-list-inline-embed .logseq-block-embed {
+.markdown-source-view.mod-cm6 .cm-content .block-reference-embed-widget.is-inline-embed.is-list-inline-embed .block-reference-embed {
     display: block;
     width: auto;
     max-width: 100%;
     min-width: 0;
-    max-inline-size: var(--logseq-inline-available-width-px, 100%);
+    max-inline-size: var(--block-reference-inline-available-width-px, 100%);
     overflow-wrap: anywhere;
 }
 
-.markdown-source-view.mod-cm6 .cm-content .logseq-block-embed-widget .logseq-block-embed {
+.markdown-source-view.mod-cm6 .cm-content .block-reference-embed-widget .block-reference-embed {
     width: 100%;
     margin: 0;
 }
 
-.markdown-source-view.mod-cm6 .cm-content .logseq-block-embed-widget.is-measured-list-embed {
+.markdown-source-view.mod-cm6 .cm-content .block-reference-embed-widget.is-measured-list-embed {
     width: 100%;
 }
 
-.markdown-source-view.mod-cm6 .cm-content .logseq-live-preview-list-embed {
+.markdown-source-view.mod-cm6 .cm-content .block-reference-live-preview-list-embed {
     position: relative;
     display: block;
     width: 100%;
     box-sizing: border-box;
-    padding-left: var(--logseq-list-content-offset-px, 0px);
+    padding-left: var(--block-reference-list-content-offset-px, 0px);
 }
 
-.markdown-source-view.mod-cm6 .cm-content .logseq-live-preview-list-marker {
+.markdown-source-view.mod-cm6 .cm-content .block-reference-live-preview-list-marker {
     position: absolute;
-    left: var(--logseq-list-marker-offset-px, 0px);
+    left: var(--block-reference-list-marker-offset-px, 0px);
     top: 0.5em;
-    width: max(calc(var(--logseq-list-content-offset-px, 0px) - var(--logseq-list-marker-offset-px, 0px)), 1.25em);
-    height: var(--logseq-line-height-px, 1.6em);
+    width: max(calc(var(--block-reference-list-content-offset-px, 0px) - var(--block-reference-list-marker-offset-px, 0px)), 1.25em);
+    height: var(--block-reference-line-height-px, 1.6em);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -137,54 +153,76 @@
     color: var(--text-muted);
 }
 
-.markdown-source-view.mod-cm6 .cm-content .logseq-live-preview-list-marker::before {
+.markdown-source-view.mod-cm6 .cm-content .block-reference-live-preview-list-marker::before {
     content: "•";
 }
 
-.markdown-source-view.mod-cm6 .cm-content .logseq-live-preview-list-embed > .logseq-block-embed {
+.markdown-source-view.mod-cm6 .cm-content .block-reference-live-preview-list-embed > .block-reference-embed {
     display: block;
     width: 100%;
     max-width: 100%;
     margin: 0;
 }
 
-.markdown-source-view.mod-cm6 .cm-content .logseq-live-preview-embed-layout {
+.markdown-source-view.mod-cm6 .cm-content .block-reference-live-preview-embed-layout {
     display: block;
     width: 100%;
     box-sizing: border-box;
 }
 
-.markdown-source-view.mod-cm6 .cm-content .logseq-live-preview-embed-card {
+.markdown-source-view.mod-cm6 .cm-content .block-reference-live-preview-embed-card {
     min-width: 0;
 }
 
-.markdown-reading-view li > .logseq-block-embed,
-.markdown-preview-view li > .logseq-block-embed {
+.markdown-reading-view li > .block-reference-embed,
+.markdown-preview-view li > .block-reference-embed {
     display: inline-block;
     width: calc(100% - 0.5em);
     margin: 0;
     vertical-align: top;
 }
 
-.markdown-reading-view li > .logseq-block-embed + *,
-.markdown-preview-view li > .logseq-block-embed + * {
+.markdown-reading-view li > .block-reference-embed + *,
+.markdown-preview-view li > .block-reference-embed + * {
     margin-top: 0.5em;
 }
 
-.markdown-source-view.mod-cm6 .cm-content .logseq-inline-block-ref {
+.markdown-source-view.mod-cm6 .cm-content .block-reference-inline-ref {
     font-family: var(--font-text);
 }
 
-.markdown-source-view.mod-cm6 .cm-content .logseq-block-embed p,
-.markdown-source-view.mod-cm6 .cm-content .logseq-block-embed ul,
-.markdown-source-view.mod-cm6 .cm-content .logseq-block-embed ol,
-.markdown-source-view.mod-cm6 .cm-content .logseq-block-embed pre,
-.markdown-source-view.mod-cm6 .cm-content .logseq-block-embed blockquote,
-.markdown-reading-view .logseq-block-embed p,
-.markdown-reading-view .logseq-block-embed ul,
-.markdown-reading-view .logseq-block-embed ol,
-.markdown-reading-view .logseq-block-embed pre,
-.markdown-reading-view .logseq-block-embed blockquote {
+.block-reference-stale-review-item {
+    border-top: 1px solid var(--background-modifier-border);
+    padding-top: 0.85em;
+    margin-top: 0.85em;
+}
+
+.block-reference-stale-review-summary {
+    font-weight: 600;
+    margin-bottom: 0.35em;
+}
+
+.block-reference-stale-review-meta {
+    color: var(--text-muted);
+    font-size: 0.9em;
+    margin-bottom: 0.25em;
+}
+
+.block-reference-stale-review-item.is-busy {
+    opacity: 0.7;
+    pointer-events: none;
+}
+
+.markdown-source-view.mod-cm6 .cm-content .block-reference-embed p,
+.markdown-source-view.mod-cm6 .cm-content .block-reference-embed ul,
+.markdown-source-view.mod-cm6 .cm-content .block-reference-embed ol,
+.markdown-source-view.mod-cm6 .cm-content .block-reference-embed pre,
+.markdown-source-view.mod-cm6 .cm-content .block-reference-embed blockquote,
+.markdown-reading-view .block-reference-embed p,
+.markdown-reading-view .block-reference-embed ul,
+.markdown-reading-view .block-reference-embed ol,
+.markdown-reading-view .block-reference-embed pre,
+.markdown-reading-view .block-reference-embed blockquote {
   margin-top: 0.5em;
   margin-bottom: 0.5em;
 }

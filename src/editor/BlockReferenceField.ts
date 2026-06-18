@@ -35,9 +35,9 @@ export const blockReferenceField = StateField.define<DecorationSet>({
 
                 if (mode === "embed" && interaction?.cardPos !== undefined) {
                     const source = Decoration.replace({
-                        logseqRefId: refId,
-                        logseqRole: "source",
-                        logseqSignature: signature,
+                        blockRefId: refId,
+                        blockRefRole: "source",
+                        blockRefSignature: signature,
                     }).range(from, to);
                     const card = Decoration.widget({
                         widget: new BlockReferenceWidget("loading", mode, undefined, {
@@ -47,13 +47,13 @@ export const blockReferenceField = StateField.define<DecorationSet>({
                         }),
                         block: true,
                         side: 1,
-                        logseqRefId: refId,
-                        logseqRole: "card",
-                        logseqSignature: signature,
+                        blockRefId: refId,
+                        blockRefRole: "card",
+                        blockRefSignature: signature,
                     }).range(interaction.cardPos);
 
                     widgets = widgets.update({
-                        filter: (aFrom, aTo, value) => value.spec.logseqRefId !== refId && (aTo <= from || aFrom >= to),
+                        filter: (aFrom, aTo, value) => value.spec.blockRefId !== refId && (aTo <= from || aFrom >= to),
                         add: [source, card],
                         sort: true,
                     });
@@ -65,14 +65,14 @@ export const blockReferenceField = StateField.define<DecorationSet>({
                 const loading = Decoration.replace({
                     widget: new BlockReferenceWidget("loading", mode, undefined, interaction ? { ...interaction, refId } : undefined),
                     block: isBlockWidget,
-                    logseqRefId: refId,
-                    logseqRole: "single",
-                    logseqSignature: signature,
+                    blockRefId: refId,
+                    blockRefRole: "single",
+                    blockRefSignature: signature,
                 }).range(from, to);
 
                 widgets = widgets.update({
                     // 移除与此范围重叠的旧装饰，避免重复
-                    filter: (aFrom, aTo, value) => value.spec.logseqRefId !== refId && (aTo <= from || aFrom >= to),
+                    filter: (aFrom, aTo, value) => value.spec.blockRefId !== refId && (aTo <= from || aFrom >= to),
                     add: [loading],
                 });
             }
@@ -83,9 +83,9 @@ export const blockReferenceField = StateField.define<DecorationSet>({
 
                 if (mode === "embed" && interaction?.cardPos !== undefined) {
                     const source = Decoration.replace({
-                        logseqRefId: refId,
-                        logseqRole: "source",
-                        logseqSignature: signature,
+                        blockRefId: refId,
+                        blockRefRole: "source",
+                        blockRefSignature: signature,
                     }).range(from, to);
                     const card = Decoration.widget({
                         widget: new BlockReferenceWidget("rendered", mode, content, {
@@ -95,13 +95,13 @@ export const blockReferenceField = StateField.define<DecorationSet>({
                         }),
                         block: true,
                         side: 1,
-                        logseqRefId: refId,
-                        logseqRole: "card",
-                        logseqSignature: signature,
+                        blockRefId: refId,
+                        blockRefRole: "card",
+                        blockRefSignature: signature,
                     }).range(interaction.cardPos);
 
                     widgets = widgets.update({
-                        filter: (aFrom, aTo, value) => value.spec.logseqRefId !== refId && (aTo <= from || aFrom >= to),
+                        filter: (aFrom, aTo, value) => value.spec.blockRefId !== refId && (aTo <= from || aFrom >= to),
                         add: [source, card],
                         sort: true,
                     });
@@ -112,14 +112,14 @@ export const blockReferenceField = StateField.define<DecorationSet>({
                 const rendered = Decoration.replace({
                     widget: new BlockReferenceWidget("rendered", mode, content, interaction ? { ...interaction, refId } : undefined),
                     block: isBlockWidget,
-                    logseqRefId: refId,
-                    logseqRole: "single",
-                    logseqSignature: signature,
+                    blockRefId: refId,
+                    blockRefRole: "single",
+                    blockRefSignature: signature,
                 }).range(from, to);
 
                 // 关键：移除与此范围重叠的旧装饰，并添加新的 replace+widget
                 widgets = widgets.update({
-                    filter: (aFrom, aTo, value) => value.spec.logseqRefId !== refId && (aTo <= from || aFrom >= to),
+                    filter: (aFrom, aTo, value) => value.spec.blockRefId !== refId && (aTo <= from || aFrom >= to),
                     add: [rendered],
                 });
             }
@@ -127,7 +127,7 @@ export const blockReferenceField = StateField.define<DecorationSet>({
                 const { from, to, refId } = effect.value;
                 widgets = widgets.update({
                     filter: (aFrom, aTo, value) => {
-                        if (refId && value.spec.logseqRefId === refId) {
+                        if (refId && value.spec.blockRefId === refId) {
                             return false;
                         }
 
