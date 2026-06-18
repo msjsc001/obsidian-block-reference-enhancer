@@ -2,28 +2,33 @@
 
 ## Goal
 
-Prepare `Block Reference Enhancer` for its first submission to the official Obsidian community plugin directory without regressing the current UUID block reference and block embed features.
+Submit `Block Reference Enhancer` to the official Obsidian community plugin directory without regressing the current UUID block reference and block embed features.
 
 ## Current State
 
 - Repository default branch is `main`.
-- Release candidate commit on the plugin repository is `8bfd6a0`.
-- Git tag `1.1.1` has already been pushed to `origin`.
-- Release build files have already been generated locally:
+- Plugin repository is `msjsc001/obsidian-block-reference-enhancer`.
+- Manifest ID is `block-reference-enhancer`.
+- Display name is `Block Reference Enhancer`.
+- Current release version is `1.1.1`.
+- Release tag `1.1.1` already exists on GitHub.
+- GitHub Release `1.1.1` already exists and already includes:
   - `main.js`
   - `manifest.json`
   - `styles.css`
-- There is currently no GitHub CLI or GitHub API token available in this environment.
-- There is currently no `msjsc001/obsidian-releases` fork yet, so the final community-directory PR cannot be pushed automatically from here.
+- The submission helper files in this folder are:
+  - `community-plugin-entry.block-reference-enhancer.json`
+  - `obsidian-community-submission-pr-body-1.1.1.md`
 
 ## Current Product Decisions
 
-- Display name stays `Block Reference Enhancer`.
-- Manifest ID is `block-reference-enhancer`.
-- Repository is `msjsc001/obsidian-block-reference-enhancer`.
-- Current release candidate version is `1.1.1`.
-- `fundingUrl` is intentionally omitted for now.
-- The plugin is documented as a local-first renderer and indexer for UUID-based block references and block embeds, with compatibility for common Logseq-style outline syntax.
+- `fundingUrl` stays omitted for now.
+- The plugin is positioned as a UUID block reference and block embed enhancer for Obsidian.
+- Logseq is mentioned only as a compatible outline syntax style in documentation, not as the plugin identity.
+- The plugin remains local-first:
+  - no telemetry
+  - no remote sync
+  - no note content upload
 
 ## Submission-Oriented Changes Already Applied
 
@@ -31,13 +36,13 @@ Prepare `Block Reference Enhancer` for its first submission to the official Obsi
 - Removed the empty `fundingUrl` field from `manifest.json`.
 - Pinned the Obsidian dev dependency instead of using `latest`.
 - Added the missing direct `@codemirror/state` dependency declaration.
-- Switched index cache persistence to Obsidian's plugin data storage via `Plugin.loadData()` / `Plugin.saveData()`.
+- Switched index cache persistence to Obsidian's plugin data storage via `Plugin.loadData()` and `Plugin.saveData()`.
 - Removed runtime `console.log` noise.
-- Renamed command IDs so they no longer include the plugin ID.
-- Removed direct `innerHTML` DOM writes from source code paths that are likely to be checked by automated review.
+- Renamed command IDs so they no longer include legacy naming.
+- Removed direct `innerHTML` DOM writes from sensitive rendering paths.
 - Updated build config so production builds are minified.
 - Updated README files so manual install points to GitHub release assets instead of the source tree.
-- Added local-only / no-telemetry / no-network disclosure text to the README files.
+- Added local-only, no-telemetry, and no-network disclosure text to the README files.
 
 ## Canonical Release Metadata
 
@@ -53,96 +58,83 @@ Use these values consistently in the release, PR, and community entry:
 }
 ```
 
-## Release Build Steps
+The same JSON is stored in `community-plugin-entry.block-reference-enhancer.json`.
 
-1. Run `npm install` if dependencies changed.
-2. Run `npm run build`.
-3. Confirm the root release files are up to date:
-   - `main.js`
-   - `manifest.json`
-   - `styles.css`
-4. Confirm `manifest.json` version matches `package.json` and `versions.json`.
+## Verified Release State
 
-## GitHub Release Steps
-
-Create a GitHub release with:
+The GitHub release is already complete:
 
 - Tag name: `1.1.1`
 - Release title: `1.1.1`
 - No `v` prefix
+- Assets uploaded:
+  - `main.js`
+  - `manifest.json`
+  - `styles.css`
 
-Attach these exact files as release assets:
+Release URL:
 
-- `main.js`
-- `manifest.json`
-- `styles.css`
-
-The release assets are what Obsidian installs. The root `manifest.json` and `README.md` are used for directory metadata and details.
-
-Current status:
-
-- The tag already exists on GitHub: `1.1.1`
-- The remaining release action is to create the GitHub Release page for that tag and upload the three assets
-
-## Community Directory Submission Steps
-
-Current practical path:
-
-1. Fork `obsidianmd/obsidian-releases`.
-2. Add one entry to `community-plugins.json`:
-
-```json
-{
-  "id": "block-reference-enhancer",
-  "name": "Block Reference Enhancer",
-  "author": "msjsc001",
-  "description": "Render UUID-based block references and block embeds in Obsidian.",
-  "repo": "msjsc001/obsidian-block-reference-enhancer"
-}
+```text
+https://github.com/msjsc001/obsidian-block-reference-enhancer/releases/tag/1.1.1
 ```
 
-3. Open a PR against `obsidianmd/obsidian-releases`.
-4. Use the official plugin PR template.
-5. Keep `Allow edits from maintainers` enabled.
+## Actual Submission Path To Use
 
-Current status:
+Official documentation currently points users toward the Obsidian community submission flow, but recent real plugin submissions are still being accepted through pull requests to `obsidianmd/obsidian-releases`.
 
-- The exact JSON entry is stored in `plans/community-plugin-entry.block-reference-enhancer.json`.
-- A ready-to-paste PR body is stored in `plans/obsidian-community-submission-pr-body-1.1.1.md`.
-- The missing prerequisite is the fork itself.
+For this plugin, the practical working path is:
 
-## PR Checklist Draft
+1. Fork `obsidianmd/obsidian-releases`
+2. Append the plugin entry to `community-plugins.json`
+3. Open a PR titled `Add plugin: Block Reference Enhancer`
+4. Wait for automated checks and reviewer feedback
 
-Use this checklist body when opening the submission PR:
+## Submission Work Already Completed
 
-```md
-# I am submitting a new Community Plugin
+The following submission work is already done:
 
-- [x] I attest that I have done my best to deliver a high-quality plugin, am proud of the code I have written, and would recommend it to others. I commit to maintaining the plugin and being responsive to bug reports. If I am no longer able to maintain it, I will make reasonable efforts to find a successor maintainer or withdraw the plugin from the directory.
+1. Fork prepared:
+   - `msjsc001/obsidian-releases`
+2. Upstream entry prepared in the fork:
+   - `community-plugins.json` already contains the `block-reference-enhancer` entry
+3. Entry ordering handled:
+   - the plugin entry was appended at the end of the list, matching common submission practice
+4. PR body prepared:
+   - see `obsidian-community-submission-pr-body-1.1.1.md`
 
-## Repo URL
+## Current Blocker
 
-Link to my plugin: https://github.com/msjsc001/obsidian-block-reference-enhancer
+The only remaining blocked step is opening the PR on `obsidianmd/obsidian-releases`.
 
-## Release Checklist
+Two creation attempts were already made from this machine:
 
-- [x] I have tested the plugin on
-- [x] Windows
-- [ ] macOS
-- [ ] Linux
-- [ ] Android _(if applicable)_
-- [ ] iOS _(if applicable)_
-- [x] My GitHub release contains all required files (as individual files, not just in the source.zip / source.tar.gz)
-- [x] `main.js`
-- [x] `manifest.json`
-- [x] `styles.css` _(optional)_
-- [x] GitHub release name matches the exact version number specified in my manifest.json
-- [x] The `id` in my `manifest.json` matches the `id` in the `community-plugins.json` file.
-- [x] My README.md describes the plugin's purpose and provides clear usage instructions.
-- [x] I have read the developer policies at https://docs.obsidian.md/Developer+policies, and have assessed my plugin's adherence to these policies.
-- [x] I have read the tips in https://docs.obsidian.md/Plugins/Releasing/Plugin+guidelines and have self-reviewed my plugin to avoid these common pitfalls.
-- [x] I have added a license in the LICENSE file.
-- [x] My project respects and is compatible with the original license of any code from other plugins that I'm using. I have given proper attribution to these other projects in my `README.md`.
+1. Local saved GitHub credential via GitHub REST API
+   - endpoint: `POST /repos/obsidianmd/obsidian-releases/pulls`
+   - result: `404 Not Found`
+2. Connected GitHub integration in this Codex environment
+   - action: create pull request on `obsidianmd/obsidian-releases`
+   - result: `403 Resource not accessible by integration`
+
+Interpretation:
+
+- The fork update permissions were sufficient for `msjsc001/obsidian-releases`
+- The currently available credentials are not sufficient to create a PR against the upstream `obsidianmd/obsidian-releases` repository
+- This is a credential-scope blocker, not a repository-content blocker
+
+## Manual Or Next-Run Completion Path
+
+Once a broader GitHub authentication context is available, open the PR with:
+
+- upstream repo: `obsidianmd/obsidian-releases`
+- base branch: `master`
+- head branch: `msjsc001:master`
+- title: `Add plugin: Block Reference Enhancer`
+- body file: `obsidian-community-submission-pr-body-1.1.1.md`
+
+Direct compare URL:
+
+```text
+https://github.com/obsidianmd/obsidian-releases/compare/master...msjsc001:master?expand=1
 ```
 
 ## Expected Review Focus
@@ -154,16 +146,17 @@ The most likely review surfaces for this plugin are:
 - plugin data storage approach
 - README clarity
 - release asset completeness
-- mobile compatibility assumptions if `isDesktopOnly` remains `false`
+- mobile compatibility assumptions because `isDesktopOnly` is `false`
+- support and maintenance expectations for a community plugin
 
 ## If Review Feedback Arrives
 
 Handle reviewer feedback with these priorities:
 
-1. Fix any automated "Required" issues first.
-2. Push fixes to the same repository and branch; do not open a new submission PR.
-3. Keep manifest, README, and release assets synchronized if any visible metadata changes.
-4. If reviewers question mobile compatibility, either test and confirm it properly or narrow support explicitly.
+1. Fix any required issues first
+2. Keep `manifest.json`, release assets, and README files synchronized
+3. If metadata changes, update both the plugin repo and the submission helper files in `plans/`
+4. If mobile support is questioned, either verify it properly or narrow the support claim explicitly
 
 ## Non-Goals For This Submission
 
@@ -171,13 +164,12 @@ These are intentionally not part of the first community submission:
 
 - donation links
 - a built-in search system for expanded block content
-- additional settings UI
+- additional settings UI unrelated to current behavior
 - large architectural refactors unrelated to review compliance
 
-## Remaining Manual Actions
+## Remaining Actions
 
-1. Create a GitHub Release for tag `1.1.1` on `msjsc001/obsidian-block-reference-enhancer`.
-2. Upload `main.js`, `manifest.json`, and `styles.css` as individual release assets.
-3. Create the fork `msjsc001/obsidian-releases` on GitHub.
-4. Add the JSON entry from `plans/community-plugin-entry.block-reference-enhancer.json` to `community-plugins.json` in the fork.
-5. Open the PR against `obsidianmd/obsidian-releases` using the body from `plans/obsidian-community-submission-pr-body-1.1.1.md`.
+1. Open the upstream PR from `msjsc001:master` to `obsidianmd:master`
+2. Watch automated checks on that PR
+3. Address any reviewer feedback
+4. Merge after approval

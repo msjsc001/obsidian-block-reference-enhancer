@@ -24,4 +24,5 @@ Link to my plugin: https://github.com/msjsc001/obsidian-block-reference-enhancer
 - [x] I have read the developer policies at https://docs.obsidian.md/Developer+policies, and have assessed my plugin's adherence to these policies.
 - [x] I have read the tips in https://docs.obsidian.md/Plugins/Releasing/Plugin+guidelines and have self-reviewed my plugin to avoid these common pitfalls.
 - [x] I have added a license in the LICENSE file.
-- [x] My project respects and is compatible with the original license of any code from other plugins that I'm using. I have given proper attribution to these other projects in my `README.md`.
+- [x] My project respects and is compatible with the original license of any code from other plugins that I'm using.  
+I have given proper attribution to these other projects in my `README.md`.
