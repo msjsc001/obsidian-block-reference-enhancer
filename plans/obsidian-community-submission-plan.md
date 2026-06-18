@@ -53,7 +53,7 @@ Use these values consistently in the release, PR, and community entry:
   "id": "block-reference-enhancer",
   "name": "Block Reference Enhancer",
   "author": "msjsc001",
-  "description": "Render UUID-based block references and block embeds in Obsidian.",
+  "description": "Render UUID-based block references and block embeds from Markdown.",
   "repo": "msjsc001/obsidian-block-reference-enhancer"
 }
 ```
