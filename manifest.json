@@ -1,7 +1,7 @@
 {
-    "id": "logseq-block-ref-enhancer",
+    "id": "block-reference-enhancer",
     "name": "Block Reference Enhancer",
-    "version": "1.1.0",
+    "version": "1.1.1",
     "minAppVersion": "0.15.0",
     "description": "Render UUID-based block references and block embeds in Obsidian.",
     "author": "msjsc001",

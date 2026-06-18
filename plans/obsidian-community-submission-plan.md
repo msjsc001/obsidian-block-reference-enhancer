@@ -7,10 +7,9 @@ Prepare `Block Reference Enhancer` for its first submission to the official Obsi
 ## Current Product Decisions
 
 - Display name stays `Block Reference Enhancer`.
-- Manifest ID stays `logseq-block-ref-enhancer`.
-  This legacy ID is intentionally retained for local install compatibility and existing plugin data compatibility.
+- Manifest ID is `block-reference-enhancer`.
 - Repository is `msjsc001/obsidian-block-reference-enhancer`.
-- Current release candidate version is `1.1.0`.
+- Current release candidate version is `1.1.1`.
 - `fundingUrl` is intentionally omitted for now.
 - The plugin is documented as a local-first renderer and indexer for UUID-based block references and block embeds, with compatibility for common Logseq-style outline syntax.
 
@@ -34,7 +33,7 @@ Use these values consistently in the release, PR, and community entry:
 
 ```json
 {
-  "id": "logseq-block-ref-enhancer",
+  "id": "block-reference-enhancer",
   "name": "Block Reference Enhancer",
   "author": "msjsc001",
   "description": "Render UUID-based block references and block embeds in Obsidian.",
@@ -56,8 +55,8 @@ Use these values consistently in the release, PR, and community entry:
 
 Create a GitHub release with:
 
-- Tag name: `1.1.0`
-- Release title: `1.1.0`
+- Tag name: `1.1.1`
+- Release title: `1.1.1`
 - No `v` prefix
 
 Attach these exact files as release assets:
@@ -77,7 +76,7 @@ Current practical path:
 
 ```json
 {
-  "id": "logseq-block-ref-enhancer",
+  "id": "block-reference-enhancer",
   "name": "Block Reference Enhancer",
   "author": "msjsc001",
   "description": "Render UUID-based block references and block embeds in Obsidian.",

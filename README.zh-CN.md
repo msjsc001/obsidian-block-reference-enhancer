@@ -2,6 +2,11 @@
 
 英文主文档见 [README.md](./README.md)。
 
+> 说明
+> 插件显示名是 `Block Reference Enhancer`。
+> 插件 ID 和安装文件夹名是 `block-reference-enhancer`。
+> GitHub 仓库名保留 `obsidian-` 前缀，仅用于仓库命名，不是插件 ID。
+
 <img alt="20210606180518" src="https://github.com/user-attachments/assets/24556d2d-cca1-4913-a6b6-8e9e3418304a" />
 
 <img alt="图片" src="https://github.com/user-attachments/assets/b69b1a35-7e31-4cf2-ae20-73ce725e7046" />
@@ -60,8 +65,7 @@
 1. 从最新 GitHub Release 下载 `main.js`、`manifest.json`、`styles.css`。
 2. 打开你的 Obsidian 库目录。
 3. 进入 `.obsidian/plugins/`。
-4. 新建一个文件夹，名字使用插件 ID：`logseq-block-ref-enhancer`。
-   当前插件 ID 仍保留旧值以兼容现有安装和本地数据。
+4. 新建一个文件夹，名字使用插件 ID：`block-reference-enhancer`。
 5. 将这些文件复制进去：
    - `main.js`
    - `manifest.json`
@@ -77,6 +81,7 @@
 - 索引完成后，状态栏会保留当前 `ready` 统计信息，方便确认插件已经完成启动期索引。
 - 如果你在 Obsidian 之外通过 Logseq、同步工具、外部编辑器或 git 大量改动了文件，建议手动重建一次索引。
 - 如果本地缓存文件不存在，插件启动时会提示正在建立新的完整索引。
+- 如果你之前使用过更早的预发布版本，而且当时的插件 ID 不同，请按当前文件夹名重新安装，并允许插件在首次启动时重新完整建索引。
 
 ## 状态栏与索引状态
 
@@ -238,7 +243,7 @@ npm run build
 
 发布说明：
 - `npm run build` 会产出用于发布的生产版 `main.js`。
-- 面向 Obsidian 社区插件目录发布时，GitHub tag 建议直接使用精确版本号，例如 `1.1.0`，不要加 `v` 前缀。
+- 面向 Obsidian 社区插件目录发布时，GitHub tag 建议直接使用精确版本号，例如 `1.1.1`，不要加 `v` 前缀。
 - 每个 GitHub Release 都应上传 `main.js`、`manifest.json`、`styles.css`。
 
 ## 已知情况

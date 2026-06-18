@@ -1,6 +1,6 @@
 {
     "name": "obsidian-block-reference-enhancer",
-    "version": "1.1.0",
+    "version": "1.1.1",
     "description": "Render UUID-based block references and block embeds in Obsidian.",
     "main": "main.js",
     "scripts": {

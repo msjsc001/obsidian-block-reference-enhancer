@@ -2,6 +2,11 @@
 
 Simplified Chinese documentation is available in [README.zh-CN.md](./README.zh-CN.md).
 
+> Note
+> The plugin display name is `Block Reference Enhancer`.
+> The plugin ID and install folder name are `block-reference-enhancer`.
+> The GitHub repository keeps the `obsidian-` prefix only as the repository name.
+
 <img alt="20210606180518" src="https://github.com/user-attachments/assets/dbb64e41-f922-483f-9cf3-27916a57aa5b" />
 
 <img alt="Screenshot" src="https://github.com/user-attachments/assets/b69b1a35-7e31-4cf2-ae20-73ce725e7046" />
@@ -58,8 +63,7 @@ Install from the latest GitHub release assets rather than from the source tree.
 1. Download `main.js`, `manifest.json`, and `styles.css` from the latest GitHub release.
 2. Open your vault folder.
 3. Go to `.obsidian/plugins/`.
-4. Create a folder named `logseq-block-ref-enhancer`.
-   The plugin ID still keeps this legacy value for installation and local data compatibility.
+4. Create a folder named `block-reference-enhancer`.
 5. Copy these files into it:
    - `main.js`
    - `manifest.json`
@@ -75,6 +79,7 @@ After the plugin is enabled:
 - After startup indexing finishes, the status bar keeps a `ready` summary so you can confirm the plugin is done.
 - If many files were changed outside Obsidian, rebuilding the index manually is recommended.
 - If no local cache file exists, startup shows that a fresh full index build is running.
+- If you previously used an earlier pre-release build with a different plugin ID, reinstall into the current folder name and allow one fresh index rebuild.
 
 ## Status Bar and Index States
 
@@ -236,7 +241,7 @@ Build artifacts:
 
 Release notes:
 - `npm run build` produces the production `main.js`.
-- Community-plugin releases should use an exact numeric GitHub tag such as `1.1.0`, without a `v` prefix.
+- Community-plugin releases should use an exact numeric GitHub tag such as `1.1.1`, without a `v` prefix.
 - Each GitHub release should attach `main.js`, `manifest.json`, and `styles.css`.
 
 ## Known Limitations
