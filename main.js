@@ -27,7 +27,7 @@ __export(main_exports, {
   default: () => BlockReferenceEnhancer
 });
 module.exports = __toCommonJS(main_exports);
-var import_obsidian5 = require("obsidian");
+var import_obsidian7 = require("obsidian");
 
 // src/services/IndexService.ts
 var import_obsidian = require("obsidian");
@@ -272,7 +272,7 @@ ${line}` : line;
 };
 
 // src/services/IndexService.ts
-var CACHE_SCHEMA_VERSION = 2;
+var CACHE_SCHEMA_VERSION = 3;
 var RECOVERY_PAGE_PATH = "pages/Block Recovery.md";
 var IndexService = class extends import_obsidian.Events {
   constructor(app, pluginDataPath) {
@@ -281,6 +281,8 @@ var IndexService = class extends import_obsidian.Events {
     this.blocksById = /* @__PURE__ */ new Map();
     this.refsById = /* @__PURE__ */ new Map();
     this.fileMetaByPath = /* @__PURE__ */ new Map();
+    this.sourceBlocksByFile = /* @__PURE__ */ new Map();
+    this.activeSourceBlocksById = /* @__PURE__ */ new Map();
     this.indexRevision = 0;
     this.operationQueue = Promise.resolve();
     this.app = app;
@@ -341,8 +343,10 @@ var IndexService = class extends import_obsidian.Events {
   }
   async processFileRename(oldPath, newPath) {
     await this.queueOperation(async () => {
+      var _a;
       const normalizedNewPath = (0, import_obsidian.normalizePath)(newPath);
       const fileMeta = this.fileMetaByPath.get(oldPath);
+      const sourceBlocks = (_a = this.sourceBlocksByFile.get(oldPath)) != null ? _a : [];
       let didChange = false;
       if (fileMeta) {
         this.fileMetaByPath.delete(oldPath);
@@ -350,6 +354,16 @@ var IndexService = class extends import_obsidian.Events {
           ...fileMeta,
           path: normalizedNewPath
         });
+        didChange = true;
+      }
+      if (sourceBlocks.length > 0) {
+        this.sourceBlocksByFile.delete(oldPath);
+        const renamedBlocks = sourceBlocks.map((block) => ({
+          ...block,
+          filePath: normalizedNewPath
+        }));
+        this.sourceBlocksByFile.set(normalizedNewPath, renamedBlocks);
+        this.rebuildActiveSourceBlocksById();
         didChange = true;
       }
       for (const block of this.blocksById.values()) {
@@ -368,6 +382,9 @@ var IndexService = class extends import_obsidian.Events {
       }
       if (!didChange) {
         return;
+      }
+      for (const block of sourceBlocks) {
+        this.refreshCanonicalBlock(block.id);
       }
       this.scheduleSave();
       this.notifyIndexUpdated();
@@ -394,6 +411,26 @@ var IndexService = class extends import_obsidian.Events {
   getReferenceCount(id) {
     var _a, _b;
     return (_b = (_a = this.refsById.get(id)) == null ? void 0 : _a.length) != null ? _b : 0;
+  }
+  getBlocksForFile(filePath) {
+    var _a;
+    const blocks = (_a = this.sourceBlocksByFile.get(filePath)) != null ? _a : [];
+    return blocks.map((block) => ({ id: block.id, block })).sort((left, right) => left.block.startLine - right.block.startLine || left.id.localeCompare(right.id));
+  }
+  getPaginatedReferencesToBlock(id, page, pageSize) {
+    const normalizedPageSize = Math.max(1, pageSize);
+    const references = this.getReferencesToBlock(id);
+    const total = references.length;
+    const maxPage = total === 0 ? 0 : Math.max(Math.ceil(total / normalizedPageSize) - 1, 0);
+    const normalizedPage = Math.max(0, Math.min(page, maxPage));
+    const start = normalizedPage * normalizedPageSize;
+    const end = start + normalizedPageSize;
+    return {
+      page: normalizedPage,
+      pageSize: normalizedPageSize,
+      total,
+      references: references.slice(start, end)
+    };
   }
   getStaleBlocks() {
     return [...this.blocksById.entries()].filter(([, block]) => block.status === "stale").map(([id, block]) => ({
@@ -443,12 +480,11 @@ var IndexService = class extends import_obsidian.Events {
     return results.slice(0, 50);
   }
   findBlockByFileAndLine(filePath, line) {
-    for (const [id, block] of this.blocksById.entries()) {
-      if (block.status !== "active") {
-        continue;
-      }
-      if (block.filePath === filePath && block.startLine === line) {
-        return { id, block };
+    var _a;
+    const blocks = (_a = this.sourceBlocksByFile.get(filePath)) != null ? _a : [];
+    for (const block of blocks) {
+      if (block.startLine === line) {
+        return { id: block.id, block };
       }
     }
     return null;
@@ -457,7 +493,7 @@ var IndexService = class extends import_obsidian.Events {
     var _a, _b, _c;
     const now = Date.now();
     const existing = this.blocksById.get(id);
-    this.blocksById.set(id, {
+    const nextBlock = {
       id,
       filePath: block.filePath,
       rawContent: block.rawContent,
@@ -469,7 +505,10 @@ var IndexService = class extends import_obsidian.Events {
       firstSeenAt: (_c = existing == null ? void 0 : existing.firstSeenAt) != null ? _c : now,
       lastSeenAt: now,
       recoveredAt: (existing == null ? void 0 : existing.status) === "stale" ? now : existing == null ? void 0 : existing.recoveredAt
-    });
+    };
+    this.blocksById.set(id, nextBlock);
+    this.upsertSourceBlockForFile(nextBlock.filePath, nextBlock);
+    this.upsertActiveSourceBlock(nextBlock);
     this.scheduleSave();
     this.notifyIndexUpdated();
   }
@@ -516,9 +555,10 @@ ${recoveryMarkdown}`);
     var _a;
     const previousBlocks = new Map(this.blocksById);
     const markdownFiles = this.app.vault.getMarkdownFiles();
-    const nextBlocks = /* @__PURE__ */ new Map();
     const nextRefs = /* @__PURE__ */ new Map();
     const nextFileMeta = /* @__PURE__ */ new Map();
+    const nextSourceBlocksByFile = /* @__PURE__ */ new Map();
+    const nextActiveSourceBlocksById = /* @__PURE__ */ new Map();
     let processedFiles = 0;
     this.emitProgress({
       processedFiles: 0,
@@ -529,18 +569,30 @@ ${recoveryMarkdown}`);
     }, onProgress);
     for (const file of markdownFiles) {
       const parsed = await this.parseFile(file);
-      this.populateStateFromParsedFile(nextBlocks, nextRefs, nextFileMeta, file, parsed, previousBlocks);
+      this.populateStateFromParsedFile(
+        nextRefs,
+        nextFileMeta,
+        nextSourceBlocksByFile,
+        nextActiveSourceBlocksById,
+        file,
+        parsed,
+        previousBlocks
+      );
       processedFiles++;
       if (processedFiles % 50 === 0 || processedFiles === markdownFiles.length) {
         this.emitProgress({
           processedFiles,
           totalFiles: markdownFiles.length,
-          blockCount: this.countActiveBlocks(nextBlocks),
+          blockCount: nextActiveSourceBlocksById.size,
           referenceCount: this.countReferenceLocations(nextRefs),
           phase
         }, onProgress);
         await this.yieldToMainThread();
       }
+    }
+    const nextBlocks = /* @__PURE__ */ new Map();
+    for (const [id, activeSourceBlocks] of nextActiveSourceBlocksById.entries()) {
+      nextBlocks.set(id, this.buildCanonicalActiveBlock(id, activeSourceBlocks, previousBlocks.get(id)));
     }
     for (const [id, previousBlock] of previousBlocks.entries()) {
       if (nextBlocks.has(id)) {
@@ -562,6 +614,8 @@ ${recoveryMarkdown}`);
     this.blocksById = nextBlocks;
     this.refsById = nextRefs;
     this.fileMetaByPath = nextFileMeta;
+    this.sourceBlocksByFile = nextSourceBlocksByFile;
+    this.activeSourceBlocksById = nextActiveSourceBlocksById;
     await this.saveIndexToCache();
     this.notifyIndexUpdated();
     return this.getStats();
@@ -658,34 +712,38 @@ ${recoveryMarkdown}`);
     };
   }
   async processFileChangeInternal(file, emitUpdate) {
-    var _a, _b, _c;
+    var _a, _b;
     const parsed = await this.parseFile(file);
     const previousMeta = this.fileMetaByPath.get(file.path);
-    const previousBlockIds = new Set((_a = previousMeta == null ? void 0 : previousMeta.blockIds) != null ? _a : []);
     const previousBlocks = /* @__PURE__ */ new Map();
-    for (const blockId of previousBlockIds) {
+    const affectedIds = /* @__PURE__ */ new Set();
+    for (const blockId of (_a = previousMeta == null ? void 0 : previousMeta.blockIds) != null ? _a : []) {
       const existing = this.blocksById.get(blockId);
       if (existing) {
         previousBlocks.set(blockId, existing);
       }
-      this.blocksById.delete(blockId);
+      affectedIds.add(blockId);
+    }
+    const removedSourceBlocks = this.removeSourceBlocksForFileInternal(file.path);
+    for (const block of removedSourceBlocks) {
+      affectedIds.add(block.id);
     }
     this.removeReferencesForFile(file.path, (_b = previousMeta == null ? void 0 : previousMeta.referencedIds) != null ? _b : []);
     this.fileMetaByPath.delete(file.path);
-    this.populateStateFromParsedFile(this.blocksById, this.refsById, this.fileMetaByPath, file, parsed, previousBlocks);
-    const nextBlockIds = /* @__PURE__ */ new Set([...parsed.blocks.keys()]);
-    for (const [blockId, previousBlock] of previousBlocks.entries()) {
-      if (nextBlockIds.has(blockId)) {
-        continue;
-      }
-      const references = this.refsById.get(blockId);
-      if (references && references.length > 0) {
-        this.blocksById.set(blockId, {
-          ...previousBlock,
-          status: "stale",
-          lostAt: (_c = previousBlock.lostAt) != null ? _c : Date.now()
-        });
-      }
+    this.populateStateFromParsedFile(
+      this.refsById,
+      this.fileMetaByPath,
+      this.sourceBlocksByFile,
+      this.activeSourceBlocksById,
+      file,
+      parsed,
+      previousBlocks
+    );
+    for (const blockId of parsed.blocks.keys()) {
+      affectedIds.add(blockId);
+    }
+    for (const blockId of affectedIds) {
+      this.refreshCanonicalBlock(blockId, previousBlocks.get(blockId));
     }
     const didChange = true;
     if (emitUpdate) {
@@ -695,41 +753,30 @@ ${recoveryMarkdown}`);
     return didChange;
   }
   removeFileFromIndexInternal(filePath) {
-    var _a;
     const fileMeta = this.fileMetaByPath.get(filePath);
     if (!fileMeta) {
       return false;
     }
     this.fileMetaByPath.delete(filePath);
     this.removeReferencesForFile(filePath, fileMeta.referencedIds);
-    let didChange = false;
-    for (const blockId of fileMeta.blockIds) {
-      const block = this.blocksById.get(blockId);
-      if (!block) {
-        continue;
-      }
-      didChange = true;
-      const references = this.refsById.get(blockId);
-      if (references && references.length > 0) {
-        this.blocksById.set(blockId, {
-          ...block,
-          status: "stale",
-          lostAt: (_a = block.lostAt) != null ? _a : Date.now()
-        });
-        continue;
-      }
-      this.blocksById.delete(blockId);
+    const removedSourceBlocks = this.removeSourceBlocksForFileInternal(filePath);
+    const affectedIds = new Set(fileMeta.blockIds);
+    for (const block of removedSourceBlocks) {
+      affectedIds.add(block.id);
     }
-    return didChange;
+    for (const blockId of affectedIds) {
+      this.refreshCanonicalBlock(blockId);
+    }
+    return affectedIds.size > 0 || fileMeta.referencedIds.length > 0;
   }
-  populateStateFromParsedFile(targetBlocks, targetRefs, targetFileMeta, file, parsed, previousBlocks) {
+  populateStateFromParsedFile(targetRefs, targetFileMeta, targetSourceBlocksByFile, targetActiveSourceBlocksById, file, parsed, previousBlocks) {
     var _a, _b;
     const now = Date.now();
-    const blockIds = [...parsed.blocks.keys()];
+    const blockIds = [];
     const referencedIds = [...parsed.referencesById.keys()];
     for (const [id, parsedBlock] of parsed.blocks.entries()) {
-      const previousBlock = (_a = previousBlocks.get(id)) != null ? _a : targetBlocks.get(id);
-      targetBlocks.set(id, {
+      const previousBlock = (_a = previousBlocks.get(id)) != null ? _a : this.blocksById.get(id);
+      const normalizedBlock = {
         ...parsedBlock,
         id,
         status: "active",
@@ -737,7 +784,10 @@ ${recoveryMarkdown}`);
         lastSeenAt: now,
         lostAt: void 0,
         recoveredAt: (previousBlock == null ? void 0 : previousBlock.status) === "stale" ? now : previousBlock == null ? void 0 : previousBlock.recoveredAt
-      });
+      };
+      blockIds.push(id);
+      this.upsertSourceBlockForFile(file.path, normalizedBlock, targetSourceBlocksByFile);
+      this.upsertActiveSourceBlock(normalizedBlock, targetActiveSourceBlocksById);
     }
     for (const [id, references] of parsed.referencesById.entries()) {
       const existing = targetRefs.get(id);
@@ -801,6 +851,13 @@ ${recoveryMarkdown}`);
       this.fileMetaByPath = new Map(
         Object.entries(parsed.files).map(([path, meta]) => [path, { ...meta }])
       );
+      this.sourceBlocksByFile = new Map(
+        Object.entries(parsed.sourceBlocksByFile).map(([path, blocks]) => [
+          path,
+          blocks.map((block) => this.normalizeLoadedBlock(block.id, block))
+        ])
+      );
+      this.rebuildActiveSourceBlocksById();
       this.notifyIndexUpdated();
       return true;
     } catch (error) {
@@ -814,8 +871,10 @@ ${recoveryMarkdown}`);
     this.blocksById = /* @__PURE__ */ new Map();
     this.refsById = /* @__PURE__ */ new Map();
     this.fileMetaByPath = /* @__PURE__ */ new Map();
+    this.sourceBlocksByFile = /* @__PURE__ */ new Map();
+    this.activeSourceBlocksById = /* @__PURE__ */ new Map();
     for (const [id, block] of entries) {
-      this.blocksById.set(id, {
+      const loadedBlock = {
         id,
         filePath: block.filePath,
         rawContent: block.rawContent,
@@ -826,7 +885,10 @@ ${recoveryMarkdown}`);
         status: "active",
         firstSeenAt: now,
         lastSeenAt: now
-      });
+      };
+      this.blocksById.set(id, loadedBlock);
+      this.upsertSourceBlockForFile(block.filePath, loadedBlock);
+      this.upsertActiveSourceBlock(loadedBlock);
     }
   }
   normalizeLoadedBlock(id, block) {
@@ -840,6 +902,108 @@ ${recoveryMarkdown}`);
       lastSeenAt: (_d = block.lastSeenAt) != null ? _d : Date.now()
     };
   }
+  upsertSourceBlockForFile(filePath, block, targetSourceBlocksByFile = this.sourceBlocksByFile) {
+    var _a;
+    const existingBlocks = (_a = targetSourceBlocksByFile.get(filePath)) != null ? _a : [];
+    const nextBlocks = existingBlocks.filter((existingBlock) => !this.isSameSourceBlock(existingBlock, block));
+    nextBlocks.push({ ...block });
+    nextBlocks.sort((left, right) => left.startLine - right.startLine || left.id.localeCompare(right.id));
+    targetSourceBlocksByFile.set(filePath, nextBlocks);
+  }
+  removeSourceBlocksForFileInternal(filePath) {
+    var _a;
+    const blocks = (_a = this.sourceBlocksByFile.get(filePath)) != null ? _a : [];
+    if (blocks.length === 0) {
+      return [];
+    }
+    this.sourceBlocksByFile.delete(filePath);
+    for (const block of blocks) {
+      const activeBlocks = this.activeSourceBlocksById.get(block.id);
+      if (!activeBlocks) {
+        continue;
+      }
+      const nextBlocks = activeBlocks.filter((existingBlock) => !this.isSameSourceBlock(existingBlock, block));
+      if (nextBlocks.length === 0) {
+        this.activeSourceBlocksById.delete(block.id);
+        continue;
+      }
+      this.activeSourceBlocksById.set(block.id, nextBlocks);
+    }
+    return blocks;
+  }
+  upsertActiveSourceBlock(block, targetActiveSourceBlocksById = this.activeSourceBlocksById) {
+    var _a;
+    const existingBlocks = (_a = targetActiveSourceBlocksById.get(block.id)) != null ? _a : [];
+    const nextBlocks = existingBlocks.filter((existingBlock) => !this.isSameSourceBlock(existingBlock, block));
+    nextBlocks.push({ ...block });
+    nextBlocks.sort((left, right) => {
+      var _a2, _b;
+      return left.filePath.localeCompare(right.filePath) || left.startLine - right.startLine || ((_a2 = left.endLine) != null ? _a2 : left.startLine) - ((_b = right.endLine) != null ? _b : right.startLine);
+    });
+    targetActiveSourceBlocksById.set(block.id, nextBlocks);
+  }
+  rebuildActiveSourceBlocksById() {
+    const nextActiveSourceBlocksById = /* @__PURE__ */ new Map();
+    for (const blocks of this.sourceBlocksByFile.values()) {
+      for (const block of blocks) {
+        this.upsertActiveSourceBlock(block, nextActiveSourceBlocksById);
+      }
+    }
+    this.activeSourceBlocksById = nextActiveSourceBlocksById;
+  }
+  refreshCanonicalBlock(id, previousBlock) {
+    var _a;
+    const activeSourceBlocks = this.activeSourceBlocksById.get(id);
+    if (activeSourceBlocks && activeSourceBlocks.length > 0) {
+      this.blocksById.set(id, this.buildCanonicalActiveBlock(id, activeSourceBlocks, previousBlock));
+      return;
+    }
+    const existingBlock = previousBlock != null ? previousBlock : this.blocksById.get(id);
+    if (!existingBlock) {
+      return;
+    }
+    if (existingBlock.status === "confirmed_deleted") {
+      this.blocksById.set(id, existingBlock);
+      return;
+    }
+    const references = this.refsById.get(id);
+    if (references && references.length > 0) {
+      this.blocksById.set(id, {
+        ...existingBlock,
+        status: "stale",
+        lostAt: (_a = existingBlock.lostAt) != null ? _a : Date.now()
+      });
+      return;
+    }
+    this.blocksById.delete(id);
+  }
+  buildCanonicalActiveBlock(id, activeSourceBlocks, previousBlock) {
+    var _a, _b;
+    const sourceBlock = this.pickCanonicalSourceBlock(activeSourceBlocks, previousBlock);
+    const now = Date.now();
+    return {
+      ...sourceBlock,
+      id,
+      status: "active",
+      firstSeenAt: (_b = (_a = previousBlock == null ? void 0 : previousBlock.firstSeenAt) != null ? _a : sourceBlock.firstSeenAt) != null ? _b : now,
+      lastSeenAt: now,
+      lostAt: void 0,
+      recoveredAt: (previousBlock == null ? void 0 : previousBlock.status) === "stale" ? now : previousBlock == null ? void 0 : previousBlock.recoveredAt
+    };
+  }
+  pickCanonicalSourceBlock(activeSourceBlocks, previousBlock) {
+    if (previousBlock) {
+      const matchingBlock = activeSourceBlocks.find((block) => this.isSameSourceBlock(block, previousBlock));
+      if (matchingBlock) {
+        return matchingBlock;
+      }
+    }
+    return activeSourceBlocks[0];
+  }
+  isSameSourceBlock(left, right) {
+    var _a, _b;
+    return left.id === right.id && left.filePath === right.filePath && left.startLine === right.startLine && ((_a = left.endLine) != null ? _a : left.startLine) === ((_b = right.endLine) != null ? _b : right.startLine);
+  }
   async saveIndexToCache() {
     try {
       const persisted = {
@@ -847,7 +1011,10 @@ ${recoveryMarkdown}`);
         builtAt: Date.now(),
         files: Object.fromEntries(this.fileMetaByPath.entries()),
         blocks: Object.fromEntries(this.blocksById.entries()),
-        refsById: Object.fromEntries(this.refsById.entries())
+        refsById: Object.fromEntries(this.refsById.entries()),
+        sourceBlocksByFile: Object.fromEntries(
+          [...this.sourceBlocksByFile.entries()].map(([path, blocks]) => [path, blocks.map((block) => ({ ...block }))])
+        )
       };
       await this.app.vault.adapter.write(this.CACHE_FILE_PATH, JSON.stringify(persisted));
     } catch (error) {
@@ -2032,9 +2199,182 @@ function createAsyncBlockRendererPlugin(plugin) {
   );
 }
 
-// src/ui/StaleBlockReviewModal.ts
+// src/editor/SourceReferenceBadgePlugin.ts
 var import_obsidian4 = require("obsidian");
-var StaleBlockReviewModal = class extends import_obsidian4.Modal {
+var import_state3 = require("@codemirror/state");
+var import_view5 = require("@codemirror/view");
+
+// src/editor/SourceReferenceBadgeWidget.ts
+var import_view4 = require("@codemirror/view");
+
+// src/ui/SourceReferenceBadgeElement.ts
+function createSourceReferenceBadgeElement(blockId, count, sourceFilePath, sourceStartLine) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "block-reference-source-badge";
+  button.dataset.blockRefSourceId = blockId;
+  button.dataset.blockRefSourceCount = String(count);
+  if (sourceFilePath) {
+    button.dataset.blockRefSourceFilePath = sourceFilePath;
+  }
+  if (typeof sourceStartLine === "number") {
+    button.dataset.blockRefSourceStartLine = String(sourceStartLine);
+  }
+  button.setAttribute("aria-label", `Referenced ${count} times`);
+  button.setAttribute("title", `${count} references`);
+  button.setText(String(count));
+  return button;
+}
+
+// src/editor/SourceReferenceBadgeWidget.ts
+var SourceReferenceBadgeWidget = class extends import_view4.WidgetType {
+  constructor(blockId, count, sourceFilePath, sourceStartLine) {
+    super();
+    this.blockId = blockId;
+    this.count = count;
+    this.sourceFilePath = sourceFilePath;
+    this.sourceStartLine = sourceStartLine;
+  }
+  eq(other) {
+    return this.blockId === other.blockId && this.count === other.count && this.sourceFilePath === other.sourceFilePath && this.sourceStartLine === other.sourceStartLine;
+  }
+  ignoreEvent() {
+    return false;
+  }
+  toDOM() {
+    const anchor = document.createElement("span");
+    anchor.className = "block-reference-source-badge-anchor";
+    anchor.appendChild(
+      createSourceReferenceBadgeElement(
+        this.blockId,
+        this.count,
+        this.sourceFilePath,
+        this.sourceStartLine
+      )
+    );
+    return anchor;
+  }
+};
+
+// src/editor/SourceReferenceBadgePlugin.ts
+var SOURCE_BADGE_DOC_SCAN_DEBOUNCE_MS = 220;
+var SOURCE_BADGE_VIEWPORT_SCAN_DEBOUNCE_MS = 100;
+var SOURCE_BADGE_VISIBLE_MARGIN_LINES = 10;
+function getVisibleLineRanges(view) {
+  const doc = view.state.doc;
+  const sourceRanges = view.visibleRanges.length > 0 ? view.visibleRanges : [view.viewport];
+  return sourceRanges.map((range) => {
+    const fromLine = Math.max(1, doc.lineAt(range.from).number - SOURCE_BADGE_VISIBLE_MARGIN_LINES);
+    const toLine = Math.min(doc.lines, doc.lineAt(Math.max(range.from, range.to - 1)).number + SOURCE_BADGE_VISIBLE_MARGIN_LINES);
+    return { fromLine, toLine };
+  });
+}
+function isLineVisible(lineNumber, visibleRanges) {
+  for (const range of visibleRanges) {
+    if (lineNumber >= range.fromLine && lineNumber <= range.toLine) {
+      return true;
+    }
+  }
+  return false;
+}
+function createSourceReferenceBadgePlugin(plugin) {
+  return import_view5.ViewPlugin.fromClass(
+    class {
+      constructor(view) {
+        this.view = view;
+        this.decorations = import_view5.Decoration.none;
+        this.refreshTimer = null;
+        this.lastFingerprint = "";
+        this.component = new import_obsidian4.Component();
+        plugin.addChild(this.component);
+        this.indexUpdatedRef = plugin.indexService.on("index-updated", () => {
+          this.lastFingerprint = "";
+          this.scheduleRefresh(SOURCE_BADGE_VIEWPORT_SCAN_DEBOUNCE_MS);
+        });
+        this.scheduleRefresh(SOURCE_BADGE_VIEWPORT_SCAN_DEBOUNCE_MS);
+      }
+      update(update) {
+        if (update.docChanged) {
+          this.scheduleRefresh(SOURCE_BADGE_DOC_SCAN_DEBOUNCE_MS);
+          return;
+        }
+        if (update.viewportChanged || update.focusChanged) {
+          this.scheduleRefresh(SOURCE_BADGE_VIEWPORT_SCAN_DEBOUNCE_MS);
+        }
+      }
+      destroy() {
+        if (this.refreshTimer) {
+          clearTimeout(this.refreshTimer);
+        }
+        plugin.indexService.offref(this.indexUpdatedRef);
+        this.component.unload();
+      }
+      scheduleRefresh(delayMs) {
+        if (this.refreshTimer) {
+          clearTimeout(this.refreshTimer);
+        }
+        this.refreshTimer = setTimeout(() => {
+          this.refreshTimer = null;
+          this.refreshDecorations();
+        }, delayMs);
+      }
+      refreshDecorations() {
+        const file = this.view.state.field(import_obsidian4.editorInfoField).file;
+        if (!file) {
+          if (this.lastFingerprint !== "no-file" || this.decorations !== import_view5.Decoration.none) {
+            this.lastFingerprint = "no-file";
+            this.decorations = import_view5.Decoration.none;
+            this.view.dispatch({});
+          }
+          return;
+        }
+        const visibleRanges = getVisibleLineRanges(this.view);
+        const blocks = plugin.indexService.getBlocksForFile(file.path);
+        const fingerprintParts = [
+          file.path,
+          String(plugin.indexService.getIndexRevision()),
+          String(this.view.state.doc.length),
+          visibleRanges.map((range) => `${range.fromLine}-${range.toLine}`).join("|")
+        ];
+        const builder = new import_state3.RangeSetBuilder();
+        for (const { id, block } of blocks) {
+          const count = plugin.indexService.getReferenceCount(id);
+          if (count <= 0) {
+            continue;
+          }
+          const lineNumber = block.startLine + 1;
+          if (!isLineVisible(lineNumber, visibleRanges) || lineNumber > this.view.state.doc.lines) {
+            continue;
+          }
+          const line = this.view.state.doc.line(lineNumber);
+          fingerprintParts.push(`${id}:${lineNumber}:${count}`);
+          builder.add(
+            line.to,
+            line.to,
+            import_view5.Decoration.widget({
+              widget: new SourceReferenceBadgeWidget(id, count, block.filePath, block.startLine),
+              side: 1
+            })
+          );
+        }
+        const fingerprint = fingerprintParts.join(":");
+        if (fingerprint === this.lastFingerprint) {
+          return;
+        }
+        this.lastFingerprint = fingerprint;
+        this.decorations = builder.finish();
+        this.view.dispatch({});
+      }
+    },
+    {
+      decorations: (value) => value.decorations
+    }
+  );
+}
+
+// src/ui/StaleBlockReviewModal.ts
+var import_obsidian5 = require("obsidian");
+var StaleBlockReviewModal = class extends import_obsidian5.Modal {
   constructor(app, plugin) {
     super(app);
     this.plugin = plugin;
@@ -2074,7 +2414,7 @@ var StaleBlockReviewModal = class extends import_obsidian4.Modal {
         text: `${staleBlock.block.filePath} | ${staleBlock.references.length} references`,
         cls: "block-reference-stale-review-meta"
       });
-      const actionSetting = new import_obsidian4.Setting(container);
+      const actionSetting = new import_obsidian5.Setting(container);
       actionSetting.addButton((button) => {
         button.setButtonText("Restore recovery page").setCta().onClick(async () => {
           this.setBusy(container, true);
@@ -2104,6 +2444,318 @@ var StaleBlockReviewModal = class extends import_obsidian4.Modal {
   }
 };
 
+// src/ui/SourceReferencePopover.ts
+var import_obsidian6 = require("obsidian");
+var REFERENCE_PAGE_SIZE = 20;
+var MAX_REFERENCE_PREVIEW_LENGTH = 140;
+var SourceReferencePopover = class {
+  constructor(plugin) {
+    this.plugin = plugin;
+    this.containerEl = null;
+    this.currentAnchorEl = null;
+    this.currentBlockId = null;
+    this.currentBlock = null;
+    this.currentPage = 0;
+    this.renderToken = 0;
+    this.handleDocumentPointerDown = (event) => {
+      var _a;
+      if (!this.containerEl) {
+        return;
+      }
+      const target = event.target;
+      if (!(target instanceof Node)) {
+        return;
+      }
+      if (this.containerEl.contains(target) || ((_a = this.currentAnchorEl) == null ? void 0 : _a.contains(target))) {
+        return;
+      }
+      const containerRect = this.containerEl.getBoundingClientRect();
+      if (event.clientX >= containerRect.left && event.clientX <= containerRect.right && event.clientY >= containerRect.top && event.clientY <= containerRect.bottom) {
+        return;
+      }
+      this.close();
+    };
+    this.handleWindowResize = () => {
+      this.position();
+    };
+    this.handleDocumentKeydown = (event) => {
+      if (event.key === "Escape") {
+        this.close();
+      }
+    };
+    this.handleDocumentScroll = (event) => {
+      var _a;
+      if (!this.containerEl) {
+        return;
+      }
+      const target = event.target;
+      if (target instanceof Node && this.containerEl.contains(target)) {
+        return;
+      }
+      if (!((_a = this.currentAnchorEl) == null ? void 0 : _a.isConnected)) {
+        this.close();
+        return;
+      }
+      this.position();
+    };
+  }
+  async toggle(anchorEl, blockId, block) {
+    if (this.currentBlockId === blockId && this.containerEl && this.currentAnchorEl === anchorEl) {
+      this.close();
+      return;
+    }
+    await this.open(anchorEl, blockId, block, 0);
+  }
+  async refreshIfOpen() {
+    if (!this.containerEl || !this.currentAnchorEl || !this.currentBlockId || !this.currentBlock) {
+      return;
+    }
+    if (!this.currentAnchorEl.isConnected) {
+      this.close();
+      return;
+    }
+    await this.open(this.currentAnchorEl, this.currentBlockId, this.currentBlock, this.currentPage);
+  }
+  close() {
+    this.renderToken += 1;
+    this.detachGlobalListeners();
+    if (this.containerEl) {
+      this.containerEl.remove();
+      this.containerEl = null;
+    }
+    this.currentAnchorEl = null;
+    this.currentBlockId = null;
+    this.currentBlock = null;
+    this.currentPage = 0;
+  }
+  destroy() {
+    this.close();
+  }
+  async open(anchorEl, blockId, block, page) {
+    if (!anchorEl.isConnected) {
+      this.close();
+      return;
+    }
+    this.currentAnchorEl = anchorEl;
+    this.currentBlockId = blockId;
+    this.currentBlock = block;
+    this.currentPage = page;
+    this.ensureContainer();
+    this.attachGlobalListeners();
+    this.position();
+    this.renderLoading();
+    const pageData = this.plugin.indexService.getPaginatedReferencesToBlock(blockId, page, REFERENCE_PAGE_SIZE);
+    if (pageData.total === 0) {
+      this.renderEmptyState();
+      return;
+    }
+    const token = ++this.renderToken;
+    const items = await Promise.all(pageData.references.map(async (reference) => ({
+      reference,
+      preview: await this.plugin.getReferencePreview(reference, MAX_REFERENCE_PREVIEW_LENGTH)
+    })));
+    if (token !== this.renderToken || !this.containerEl || this.currentBlockId !== blockId) {
+      return;
+    }
+    this.currentPage = pageData.page;
+    this.renderPage(blockId, block, pageData, items);
+  }
+  ensureContainer() {
+    if (this.containerEl) {
+      return;
+    }
+    const container = document.createElement("div");
+    container.className = "block-reference-source-popover";
+    document.body.appendChild(container);
+    this.containerEl = container;
+  }
+  attachGlobalListeners() {
+    document.addEventListener("mousedown", this.handleDocumentPointerDown, true);
+    document.addEventListener("keydown", this.handleDocumentKeydown);
+    document.addEventListener("scroll", this.handleDocumentScroll, true);
+    window.addEventListener("resize", this.handleWindowResize);
+  }
+  detachGlobalListeners() {
+    document.removeEventListener("mousedown", this.handleDocumentPointerDown, true);
+    document.removeEventListener("keydown", this.handleDocumentKeydown);
+    document.removeEventListener("scroll", this.handleDocumentScroll, true);
+    window.removeEventListener("resize", this.handleWindowResize);
+  }
+  position() {
+    if (!this.containerEl || !this.currentAnchorEl) {
+      return;
+    }
+    const anchorRect = this.currentAnchorEl.getBoundingClientRect();
+    const popoverWidth = Math.max(280, Math.min(520, window.innerWidth - 24));
+    const left = Math.min(
+      Math.max(12, anchorRect.left),
+      window.innerWidth - popoverWidth - 12
+    );
+    this.containerEl.style.width = `${popoverWidth}px`;
+    this.containerEl.style.left = `${left}px`;
+    const preferredTop = anchorRect.bottom + 8;
+    const measuredHeight = this.containerEl.offsetHeight || Math.min(360, window.innerHeight - 24);
+    const topAbove = anchorRect.top - measuredHeight - 8;
+    const fitsAbove = topAbove >= 12;
+    const fitsBelow = preferredTop + measuredHeight <= window.innerHeight - 12;
+    const top = fitsBelow ? preferredTop : fitsAbove ? topAbove : Math.max(12, window.innerHeight - measuredHeight - 12);
+    this.containerEl.style.top = `${top}px`;
+  }
+  renderLoading() {
+    if (!this.containerEl) {
+      return;
+    }
+    this.containerEl.empty();
+    this.containerEl.createDiv({
+      cls: "block-reference-source-popover-loading",
+      text: "Loading references..."
+    });
+  }
+  renderEmptyState() {
+    if (!this.containerEl) {
+      return;
+    }
+    this.containerEl.empty();
+    this.containerEl.createDiv({
+      cls: "block-reference-source-popover-loading",
+      text: "No active references."
+    });
+  }
+  renderPage(blockId, block, pageData, items) {
+    if (!this.containerEl) {
+      return;
+    }
+    this.containerEl.empty();
+    const header = this.containerEl.createDiv({ cls: "block-reference-source-popover-header" });
+    const headerMain = header.createDiv({ cls: "block-reference-source-popover-header-main" });
+    const titleEl = headerMain.createDiv({
+      cls: "block-reference-source-popover-title",
+      text: this.plugin.getBlockSummary(block)
+    });
+    titleEl.title = this.plugin.getBlockSummary(block);
+    headerMain.createDiv({
+      cls: "block-reference-source-popover-count",
+      text: this.getReferenceCountLabel(pageData.total)
+    });
+    const headerMeta = header.createDiv({ cls: "block-reference-source-popover-header-meta" });
+    const blockIdEl = headerMeta.createSpan({
+      cls: "block-reference-source-popover-block-id",
+      text: this.getShortBlockId(blockId)
+    });
+    blockIdEl.title = blockId;
+    const list = this.containerEl.createDiv({ cls: "block-reference-source-popover-list" });
+    for (const item of items) {
+      const fileName = this.getFileName(item.reference.filePath);
+      const row = list.createDiv({
+        cls: "block-reference-source-popover-item",
+        attr: {
+          role: "button",
+          tabindex: "0"
+        }
+      });
+      row.title = `${item.reference.filePath}:${item.reference.line + 1}`;
+      this.bindReferenceRowEvents(row, item.reference);
+      const headerRow = row.createDiv({ cls: "block-reference-source-popover-item-header" });
+      headerRow.createSpan({
+        cls: "block-reference-source-popover-kind",
+        text: this.getReferenceKindLabel(item.reference.kind)
+      });
+      const locationRow = headerRow.createDiv({ cls: "block-reference-source-popover-item-location" });
+      const fileNameEl = locationRow.createSpan({
+        cls: "block-reference-source-popover-item-file",
+        text: fileName
+      });
+      fileNameEl.title = item.reference.filePath;
+      locationRow.createSpan({
+        cls: "block-reference-source-popover-item-line",
+        text: `L${item.reference.line + 1}`
+      });
+      row.createDiv({
+        cls: "block-reference-source-popover-item-preview",
+        text: item.preview
+      });
+      if (fileName !== item.reference.filePath) {
+        const fullPathEl = row.createDiv({
+          cls: "block-reference-source-popover-item-path",
+          text: item.reference.filePath
+        });
+        fullPathEl.title = item.reference.filePath;
+      }
+    }
+    const pageCount = Math.max(Math.ceil(pageData.total / pageData.pageSize), 1);
+    if (pageCount > 1) {
+      const footer = this.containerEl.createDiv({ cls: "block-reference-source-popover-footer" });
+      const previousButton = footer.createEl("button", {
+        cls: "block-reference-source-popover-nav",
+        attr: {
+          type: "button",
+          "aria-label": "Previous page",
+          title: "Previous page"
+        }
+      });
+      (0, import_obsidian6.setIcon)(previousButton, "chevron-left");
+      previousButton.disabled = pageData.page <= 0;
+      previousButton.addEventListener("click", () => {
+        if (!this.currentAnchorEl) {
+          return;
+        }
+        void this.open(this.currentAnchorEl, blockId, block, pageData.page - 1);
+      });
+      footer.createDiv({
+        cls: "block-reference-source-popover-page",
+        text: `${pageData.page + 1} / ${pageCount}`
+      });
+      const nextButton = footer.createEl("button", {
+        cls: "block-reference-source-popover-nav",
+        attr: {
+          type: "button",
+          "aria-label": "Next page",
+          title: "Next page"
+        }
+      });
+      (0, import_obsidian6.setIcon)(nextButton, "chevron-right");
+      nextButton.disabled = pageData.page >= pageCount - 1;
+      nextButton.addEventListener("click", () => {
+        if (!this.currentAnchorEl) {
+          return;
+        }
+        void this.open(this.currentAnchorEl, blockId, block, pageData.page + 1);
+      });
+    }
+    this.position();
+  }
+  getReferenceKindLabel(kind) {
+    return kind === "embed" ? "EMBED" : "REF";
+  }
+  getFileName(filePath) {
+    const segments = filePath.split(/[\\/]/);
+    return segments[segments.length - 1] || filePath;
+  }
+  getShortBlockId(blockId) {
+    if (blockId.length <= 18) {
+      return blockId;
+    }
+    return `${blockId.slice(0, 8)}...${blockId.slice(-6)}`;
+  }
+  getReferenceCountLabel(total) {
+    return total === 1 ? "1 ref" : `${total} refs`;
+  }
+  bindReferenceRowEvents(row, reference) {
+    const activate = () => {
+      void this.plugin.openReferenceLocation(reference);
+      this.close();
+    };
+    row.addEventListener("click", activate);
+    row.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") {
+        return;
+      }
+      event.preventDefault();
+      activate();
+    });
+  }
+};
+
 // src/main.ts
 var DEFAULT_SETTINGS = {
   // 默认值
@@ -2121,32 +2773,36 @@ var SCROLL_ANCHOR_SAMPLE_OFFSETS_PX = [16, 32, 48, 72];
 function createBlockReferenceRegex() {
   return /\{\{embed\s+\(\(([A-Za-z0-9_-]{36,})\)\)\s*\}\}|\(\(([A-Za-z0-9_-]{36,})\)\)|（（([A-Za-z0-9_-]{36,})））/g;
 }
-var ReferencePostProcessChild = class extends import_obsidian5.MarkdownRenderChild {
-  constructor(containerEl, plugin, sourcePath) {
+var ReferencePostProcessChild = class extends import_obsidian7.MarkdownRenderChild {
+  constructor(containerEl, plugin, context) {
     super(containerEl);
     this.plugin = plugin;
-    this.sourcePath = sourcePath;
+    this.context = context;
     this.readingModeQueueRoot = null;
   }
   async onload() {
     this.readingModeQueueRoot = this.plugin.attachReadingModeRenderQueue(this.containerEl);
-    await this.plugin.processRenderedReferences(this.containerEl, this.sourcePath, this, /* @__PURE__ */ new Set());
+    await this.plugin.processRenderedReferences(this.containerEl, this.context.sourcePath, this, /* @__PURE__ */ new Set());
+    this.plugin.processReadingModeSourceBlockBadges(this.containerEl, this.context);
   }
   onunload() {
     this.plugin.detachReadingModeRenderQueue(this.readingModeQueueRoot);
   }
 };
-var BlockReferenceEnhancer = class extends import_obsidian5.Plugin {
+var BlockReferenceEnhancer = class extends import_obsidian7.Plugin {
   constructor() {
     super(...arguments);
     this.readingModeRenderQueues = /* @__PURE__ */ new Map();
+    this.referencePreviewCache = /* @__PURE__ */ new Map();
     this.statusBarEl = null;
     this.lastKnownIndexStats = null;
     this.startupFullRebuildPending = false;
+    this.sourceReferencePopover = null;
   }
   async onload() {
     await this.loadSettings();
     this.indexService = new IndexService(this.app, this.manifest.dir);
+    this.sourceReferencePopover = new SourceReferencePopover(this);
     this.statusBarEl = this.addStatusBarItem();
     this.setIndexStatusMessage("Block index: loading cache...");
     this.addCommand({
@@ -2170,8 +2826,39 @@ var BlockReferenceEnhancer = class extends import_obsidian5.Plugin {
         this.openStaleBlockReview();
       }
     });
+    this.registerDomEvent(document, "mousedown", (event) => {
+      if (event.button !== 0) {
+        return;
+      }
+      const target = event.target;
+      if (!(target instanceof HTMLElement)) {
+        return;
+      }
+      const badge = target.closest(".block-reference-source-badge");
+      if (!(badge instanceof HTMLElement)) {
+        return;
+      }
+      const blockId = badge.dataset.blockRefSourceId;
+      if (!blockId) {
+        return;
+      }
+      const sourceFilePath = badge.dataset.blockRefSourceFilePath;
+      const sourceStartLine = badge.dataset.blockRefSourceStartLine;
+      event.preventDefault();
+      event.stopPropagation();
+      const parsedSourceStartLine = typeof sourceStartLine === "string" ? Number(sourceStartLine) : void 0;
+      void this.toggleSourceReferencePopover(
+        badge,
+        blockId,
+        sourceFilePath,
+        typeof parsedSourceStartLine === "number" && Number.isFinite(parsedSourceStartLine) ? parsedSourceStartLine : void 0
+      );
+    }, true);
     this.app.workspace.onLayoutReady(async () => {
       this.registerEvent(this.indexService.on("index-updated", () => {
+        var _a;
+        this.referencePreviewCache.clear();
+        void ((_a = this.sourceReferencePopover) == null ? void 0 : _a.refreshIfOpen());
         this.refreshOpenMarkdownViews();
       }));
       await this.indexService.initialize({
@@ -2184,7 +2871,8 @@ var BlockReferenceEnhancer = class extends import_obsidian5.Plugin {
       });
       this.registerMarkdownPostProcessor(this.readingModeRenderer.bind(this));
       const asyncPlugin = createAsyncBlockRendererPlugin(this);
-      this.registerEditorExtension([blockReferenceField, asyncPlugin]);
+      const sourceReferenceBadgePlugin = createSourceReferenceBadgePlugin(this);
+      this.registerEditorExtension([blockReferenceField, asyncPlugin, sourceReferenceBadgePlugin]);
       this.registerEditorSuggest(new BlockSuggest(this.app, this.indexService));
       this.setupFileEvents();
       this.refreshOpenMarkdownViews();
@@ -2192,27 +2880,29 @@ var BlockReferenceEnhancer = class extends import_obsidian5.Plugin {
   }
   setupFileEvents() {
     this.registerEvent(this.app.vault.on("create", (file) => {
-      if (file instanceof import_obsidian5.TFile && file.extension === "md") {
+      if (file instanceof import_obsidian7.TFile && file.extension === "md") {
         void this.indexService.processFileChange(file);
       }
     }));
     this.registerEvent(this.app.vault.on("modify", (file) => {
-      if (file instanceof import_obsidian5.TFile && file.extension === "md") {
+      if (file instanceof import_obsidian7.TFile && file.extension === "md") {
         void this.indexService.processFileChange(file);
       }
     }));
     this.registerEvent(this.app.vault.on("delete", (file) => {
-      if (file instanceof import_obsidian5.TFile && file.extension === "md") {
+      if (file instanceof import_obsidian7.TFile && file.extension === "md") {
         void this.indexService.processFileDelete(file.path);
       }
     }));
     this.registerEvent(this.app.vault.on("rename", (file, oldPath) => {
-      if (file instanceof import_obsidian5.TFile && file.extension === "md") {
+      if (file instanceof import_obsidian7.TFile && file.extension === "md") {
         void this.indexService.processFileRename(oldPath, file.path);
       }
     }));
   }
   onunload() {
+    var _a;
+    (_a = this.sourceReferencePopover) == null ? void 0 : _a.destroy();
     console.log("Unloading Block Reference Enhancer plugin.");
   }
   async loadSettings() {
@@ -2230,7 +2920,7 @@ var BlockReferenceEnhancer = class extends import_obsidian5.Plugin {
     const lineContent = editor.getLine(line);
     const blockMatch = lineContent.match(/^\s*-\s(.+)/);
     if (!blockMatch) {
-      new import_obsidian5.Notice("This line is not a valid source block.");
+      new import_obsidian7.Notice("This line is not a valid source block.");
       return;
     }
     let existingBlock = this.indexService.findBlockByFileAndLine(file.path, line);
@@ -2254,7 +2944,7 @@ ${indentation}  id:: ${blockId}`;
       });
     }
     navigator.clipboard.writeText(`((${blockId}))`);
-    new import_obsidian5.Notice("Block reference copied to clipboard!");
+    new import_obsidian7.Notice("Block reference copied to clipboard!");
   }
   getInlineReferenceText(uuid) {
     return this.getInlineReferenceInfo(uuid).text;
@@ -2595,7 +3285,7 @@ ${indentation}  id:: ${blockId}`;
       return;
     }
     this.markManualRenderScope(container);
-    await import_obsidian5.MarkdownRenderer.render(this.app, markdown, container, sourcePath, component);
+    await import_obsidian7.MarkdownRenderer.render(this.app, markdown, container, sourcePath, component);
     await this.processRenderedReferences(container, sourcePath, component, visitedEmbeds);
   }
   async populateEmbedContainer(container, uuid, sourcePath, component, visitedEmbeds) {
@@ -2721,25 +3411,127 @@ ${indentation}  id:: ${blockId}`;
     if (element.closest(`[${MANUAL_RENDER_SCOPE_ATTR}="true"]`)) {
       return;
     }
-    context.addChild(new ReferencePostProcessChild(element, this, context.sourcePath));
+    context.addChild(new ReferencePostProcessChild(element, this, context));
+  }
+  processReadingModeSourceBlockBadges(element, context) {
+    const file = this.app.vault.getAbstractFileByPath(context.sourcePath);
+    if (!(file instanceof import_obsidian7.TFile)) {
+      return;
+    }
+    const sectionInfo = context.getSectionInfo(element);
+    if (!sectionInfo) {
+      return;
+    }
+    const cache = this.app.metadataCache.getFileCache(file);
+    const listItems = this.getListItemsForSection(cache, sectionInfo.lineStart, sectionInfo.lineEnd);
+    if (listItems.length === 0) {
+      return;
+    }
+    const listElements = Array.from(element.querySelectorAll("li")).filter((listItem) => {
+      return listItem.closest(`[${MANAGED_NODE_ATTR}="true"]`) === null;
+    });
+    if (listElements.length === 0) {
+      return;
+    }
+    element.querySelectorAll(".block-reference-source-badge-anchor").forEach((badge) => badge.remove());
+    const visibleSourceBlocks = this.indexService.getBlocksForFile(context.sourcePath).filter(({ block, id }) => {
+      return block.startLine >= sectionInfo.lineStart && block.startLine <= sectionInfo.lineEnd && this.indexService.getReferenceCount(id) > 0;
+    });
+    if (visibleSourceBlocks.length === 0) {
+      return;
+    }
+    const listItemCount = Math.min(listItems.length, listElements.length);
+    const listItemByLine = /* @__PURE__ */ new Map();
+    for (let index = 0; index < listItemCount; index++) {
+      listItemByLine.set(listItems[index].position.start.line, listElements[index]);
+    }
+    for (const { id, block } of visibleSourceBlocks) {
+      const listItem = listItemByLine.get(block.startLine);
+      if (!listItem) {
+        continue;
+      }
+      const count = this.indexService.getReferenceCount(id);
+      if (count <= 0) {
+        continue;
+      }
+      this.attachReadingModeSourceBadge(listItem, block, count);
+    }
+  }
+  async toggleSourceReferencePopover(anchorEl, blockId, sourceFilePath, sourceStartLine) {
+    var _a, _b;
+    const activeBlock = this.indexService.getBlock(blockId);
+    if (!activeBlock || activeBlock.status !== "active") {
+      return;
+    }
+    if (this.indexService.getReferenceCount(blockId) <= 0) {
+      return;
+    }
+    const sourceBlock = sourceFilePath && typeof sourceStartLine === "number" ? (_a = this.indexService.findBlockByFileAndLine(sourceFilePath, sourceStartLine)) == null ? void 0 : _a.block : null;
+    await ((_b = this.sourceReferencePopover) == null ? void 0 : _b.toggle(anchorEl, blockId, sourceBlock != null ? sourceBlock : activeBlock));
+  }
+  getBlockSummary(block) {
+    var _a;
+    const firstLine = (_a = block.rawContent.split(/\r?\n/, 1)[0]) == null ? void 0 : _a.trim();
+    return firstLine && firstLine.length > 0 ? firstLine : "[empty block]";
+  }
+  async getReferencePreview(reference, maxLength = 140) {
+    var _a, _b;
+    const file = this.app.vault.getAbstractFileByPath(reference.filePath);
+    if (!(file instanceof import_obsidian7.TFile)) {
+      return "[file not found]";
+    }
+    const cached = this.referencePreviewCache.get(reference.filePath);
+    let lines;
+    if (cached && cached.mtime === file.stat.mtime) {
+      lines = cached.lines;
+    } else {
+      const content = await this.app.vault.cachedRead(file);
+      lines = content.split(/\r?\n/);
+      this.referencePreviewCache.set(reference.filePath, {
+        mtime: file.stat.mtime,
+        lines
+      });
+    }
+    const line = (_b = (_a = lines[reference.line]) == null ? void 0 : _a.trim()) != null ? _b : "";
+    if (!line) {
+      return "[empty line]";
+    }
+    return line.length > maxLength ? `${line.slice(0, maxLength).trimEnd()}\u2026` : line;
+  }
+  async openReferenceLocation(reference) {
+    var _a;
+    const file = this.app.vault.getAbstractFileByPath(reference.filePath);
+    if (!(file instanceof import_obsidian7.TFile)) {
+      new import_obsidian7.Notice("Unable to open the referenced file.");
+      return;
+    }
+    const leaf = (_a = this.app.workspace.getMostRecentLeaf()) != null ? _a : this.app.workspace.getLeaf(true);
+    await leaf.openFile(file, { active: true });
+    await this.app.workspace.revealLeaf(leaf);
+    if (leaf.view instanceof import_obsidian7.MarkdownView) {
+      const position = { line: reference.line, ch: reference.ch };
+      leaf.view.editor.setCursor(position);
+      leaf.view.editor.scrollIntoView({ from: position, to: position }, true);
+      leaf.view.editor.focus();
+    }
   }
   async recoverBlockToRecoveryPage(id) {
     const recoveryFile = await this.indexService.recoverBlockToRecoveryPage(id);
     if (!recoveryFile) {
-      new import_obsidian5.Notice("Unable to recover source block to the recovery page.");
+      new import_obsidian7.Notice("Unable to recover source block to the recovery page.");
       return;
     }
-    new import_obsidian5.Notice(`Recovered source block to ${recoveryFile.path}.`);
+    new import_obsidian7.Notice(`Recovered source block to ${recoveryFile.path}.`);
   }
   async confirmBlockDeletion(id) {
     await this.indexService.confirmBlockDeletion(id);
-    new import_obsidian5.Notice("Confirmed missing source block deletion.");
+    new import_obsidian7.Notice("Confirmed missing source block deletion.");
   }
   openStaleBlockReview() {
     new StaleBlockReviewModal(this.app, this).open();
   }
   async rebuildBlockReferenceIndex() {
-    new import_obsidian5.Notice("Building block index...");
+    new import_obsidian7.Notice("Building block index...");
     try {
       const stats = await this.indexService.rebuildIndex({
         phase: "rebuild",
@@ -2748,11 +3540,11 @@ ${indentation}  id:: ${blockId}`;
         }
       });
       this.setIndexReadyStatus(stats);
-      new import_obsidian5.Notice(`Block index rebuilt: ${stats.fileCount} files, ${stats.blockCount} blocks, ${stats.referenceCount} references.`);
+      new import_obsidian7.Notice(`Block index rebuilt: ${stats.fileCount} files, ${stats.blockCount} blocks, ${stats.referenceCount} references.`);
     } catch (error) {
       this.setIndexStatusMessage("Block index: rebuild failed");
       console.error("Failed to rebuild block index:", error);
-      new import_obsidian5.Notice("Failed to rebuild block index.");
+      new import_obsidian7.Notice("Failed to rebuild block index.");
     }
   }
   updateIndexProgress(progress) {
@@ -2777,7 +3569,7 @@ ${indentation}  id:: ${blockId}`;
       case "cache-missing":
         this.startupFullRebuildPending = true;
         this.setIndexStatusMessage("Block index: no cache found, building full index...");
-        new import_obsidian5.Notice("No cached block index found. Building a new index...");
+        new import_obsidian7.Notice("No cached block index found. Building a new index...");
         return;
       case "cache-loaded":
         this.setIndexStatusMessage(
@@ -2796,7 +3588,7 @@ ${indentation}  id:: ${blockId}`;
       case "ready":
         this.setIndexReadyStatus((_d = status.stats) != null ? _d : this.lastKnownIndexStats);
         if (this.startupFullRebuildPending && status.source === "rebuild" && status.stats) {
-          new import_obsidian5.Notice(`Initial block index build complete: ${status.stats.fileCount} files, ${status.stats.blockCount} blocks, ${status.stats.referenceCount} references.`);
+          new import_obsidian7.Notice(`Initial block index build complete: ${status.stats.fileCount} files, ${status.stats.blockCount} blocks, ${status.stats.referenceCount} references.`);
         }
         this.startupFullRebuildPending = false;
         return;
@@ -2819,10 +3611,52 @@ ${indentation}  id:: ${blockId}`;
     this.statusBarEl.style.display = "";
     this.statusBarEl.setText(message);
   }
+  getListItemsForSection(cache, lineStart, lineEnd) {
+    var _a;
+    return ((_a = cache == null ? void 0 : cache.listItems) != null ? _a : []).filter((item) => item.position.start.line >= lineStart && item.position.start.line <= lineEnd).sort((left, right) => {
+      return left.position.start.line - right.position.start.line || left.position.start.col - right.position.start.col;
+    });
+  }
+  attachReadingModeSourceBadge(listItem, block, count) {
+    const blockId = block.id;
+    const existing = listItem.querySelector(`.block-reference-source-badge[data-block-ref-source-id="${CSS.escape(blockId)}"]`);
+    if (existing instanceof HTMLElement) {
+      existing.dataset.blockRefSourceCount = String(count);
+      existing.dataset.blockRefSourceFilePath = block.filePath;
+      existing.dataset.blockRefSourceStartLine = String(block.startLine);
+      existing.setAttribute("aria-label", `Referenced ${count} times`);
+      existing.setAttribute("title", `${count} references`);
+      existing.setText(String(count));
+      return;
+    }
+    const anchor = document.createElement("span");
+    anchor.className = "block-reference-source-badge-anchor";
+    anchor.appendChild(createSourceReferenceBadgeElement(blockId, count, block.filePath, block.startLine));
+    const contentHost = this.getReadingModeBadgeContentHost(listItem);
+    if (contentHost) {
+      contentHost.appendChild(anchor);
+      return;
+    }
+    const firstNestedList = Array.from(listItem.children).find((child) => child.tagName === "UL" || child.tagName === "OL");
+    if (firstNestedList) {
+      listItem.insertBefore(anchor, firstNestedList);
+      return;
+    }
+    listItem.appendChild(anchor);
+  }
+  getReadingModeBadgeContentHost(listItem) {
+    for (const child of Array.from(listItem.children)) {
+      if (child.matches("ul, ol, .block-reference-source-badge-anchor")) {
+        continue;
+      }
+      return child;
+    }
+    return null;
+  }
   refreshOpenMarkdownViews() {
     this.app.workspace.iterateAllLeaves((leaf) => {
       const view = leaf.view;
-      if (!(view instanceof import_obsidian5.MarkdownView)) {
+      if (!(view instanceof import_obsidian7.MarkdownView)) {
         return;
       }
       if (view.getMode() === "preview") {

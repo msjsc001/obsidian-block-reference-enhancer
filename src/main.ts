@@ -1,10 +1,13 @@
-import { App, Component, Editor, MarkdownPostProcessorContext, MarkdownRenderChild, MarkdownRenderer, MarkdownView, Notice, Plugin, TFile } from 'obsidian';
+import { App, CachedMetadata, Component, Editor, ListItemCache, MarkdownPostProcessorContext, MarkdownRenderChild, MarkdownRenderer, MarkdownView, Notice, Plugin, TFile } from 'obsidian';
 import { IndexService } from './services/IndexService';
 import { BlockSuggest } from './editor/BlockSuggest';
 import { blockReferenceField } from './editor/BlockReferenceField';
 import { createAsyncBlockRendererPlugin } from './editor/AsyncBlockRendererPlugin';
-import { IndexBuildStats, IndexProgress, IndexStatus } from './types';
+import { createSourceReferenceBadgePlugin } from './editor/SourceReferenceBadgePlugin';
+import { BlockCache, BlockReferenceLocation, IndexBuildStats, IndexProgress, IndexStatus } from './types';
 import { StaleBlockReviewModal } from './ui/StaleBlockReviewModal';
+import { createSourceReferenceBadgeElement } from './ui/SourceReferenceBadgeElement';
+import { SourceReferencePopover } from './ui/SourceReferencePopover';
 
 interface BlockReferenceEnhancerSettings {
 	// 未来可能会在这里添加设置
@@ -50,6 +53,11 @@ interface ReadingModeRenderQueue {
 	retainCount: number;
 }
 
+interface ReferencePreviewCacheEntry {
+	mtime: number;
+	lines: string[];
+}
+
 function createBlockReferenceRegex() {
 	return /\{\{embed\s+\(\(([A-Za-z0-9_-]{36,})\)\)\s*\}\}|\(\(([A-Za-z0-9_-]{36,})\)\)|（（([A-Za-z0-9_-]{36,})））/g;
 }
@@ -60,14 +68,15 @@ class ReferencePostProcessChild extends MarkdownRenderChild {
 	constructor(
 		containerEl: HTMLElement,
 		private readonly plugin: BlockReferenceEnhancer,
-		private readonly sourcePath: string
+		private readonly context: MarkdownPostProcessorContext
 	) {
 		super(containerEl);
 	}
 
 	async onload() {
 		this.readingModeQueueRoot = this.plugin.attachReadingModeRenderQueue(this.containerEl);
-		await this.plugin.processRenderedReferences(this.containerEl, this.sourcePath, this, new Set<string>());
+		await this.plugin.processRenderedReferences(this.containerEl, this.context.sourcePath, this, new Set<string>());
+		this.plugin.processReadingModeSourceBlockBadges(this.containerEl, this.context);
 	}
 
 	onunload() {
@@ -79,14 +88,17 @@ export default class BlockReferenceEnhancer extends Plugin {
 	settings: BlockReferenceEnhancerSettings;
 	indexService: IndexService;
 	private readonly readingModeRenderQueues = new Map<HTMLElement, ReadingModeRenderQueue>();
+	private readonly referencePreviewCache = new Map<string, ReferencePreviewCacheEntry>();
 	private statusBarEl: HTMLElement | null = null;
 	private lastKnownIndexStats: IndexBuildStats | null = null;
 	private startupFullRebuildPending = false;
+	private sourceReferencePopover: SourceReferencePopover | null = null;
 
 	async onload() {
 		await this.loadSettings();
 
 		this.indexService = new IndexService(this.app, this.manifest.dir!);
+		this.sourceReferencePopover = new SourceReferencePopover(this);
 		this.statusBarEl = this.addStatusBarItem();
 		this.setIndexStatusMessage('Block index: loading cache...');
 
@@ -114,8 +126,46 @@ export default class BlockReferenceEnhancer extends Plugin {
 			},
 		});
 
+		this.registerDomEvent(document, 'mousedown', (event) => {
+			if (event.button !== 0) {
+				return;
+			}
+
+			const target = event.target;
+			if (!(target instanceof HTMLElement)) {
+				return;
+			}
+
+			const badge = target.closest('.block-reference-source-badge');
+			if (!(badge instanceof HTMLElement)) {
+				return;
+			}
+
+			const blockId = badge.dataset.blockRefSourceId;
+			if (!blockId) {
+				return;
+			}
+
+			const sourceFilePath = badge.dataset.blockRefSourceFilePath;
+			const sourceStartLine = badge.dataset.blockRefSourceStartLine;
+
+			event.preventDefault();
+			event.stopPropagation();
+			const parsedSourceStartLine = typeof sourceStartLine === 'string' ? Number(sourceStartLine) : undefined;
+			void this.toggleSourceReferencePopover(
+				badge,
+				blockId,
+				sourceFilePath,
+				typeof parsedSourceStartLine === 'number' && Number.isFinite(parsedSourceStartLine)
+					? parsedSourceStartLine
+					: undefined,
+			);
+		}, true);
+
 		this.app.workspace.onLayoutReady(async () => {
 			this.registerEvent(this.indexService.on('index-updated', () => {
+				this.referencePreviewCache.clear();
+				void this.sourceReferencePopover?.refreshIfOpen();
 				this.refreshOpenMarkdownViews();
 			}));
 
@@ -131,7 +181,8 @@ export default class BlockReferenceEnhancer extends Plugin {
 			this.registerMarkdownPostProcessor(this.readingModeRenderer.bind(this));
 
 			const asyncPlugin = createAsyncBlockRendererPlugin(this);
-			this.registerEditorExtension([blockReferenceField, asyncPlugin]);
+			const sourceReferenceBadgePlugin = createSourceReferenceBadgePlugin(this);
+			this.registerEditorExtension([blockReferenceField, asyncPlugin, sourceReferenceBadgePlugin]);
 
 			this.registerEditorSuggest(new BlockSuggest(this.app, this.indexService));
 
@@ -167,6 +218,7 @@ export default class BlockReferenceEnhancer extends Plugin {
 	}
 
 	onunload() {
+		this.sourceReferencePopover?.destroy();
 		console.log('Unloading Block Reference Enhancer plugin.');
 	}
 
@@ -825,7 +877,139 @@ export default class BlockReferenceEnhancer extends Plugin {
 			return;
 		}
 
-		context.addChild(new ReferencePostProcessChild(element, this, context.sourcePath));
+		context.addChild(new ReferencePostProcessChild(element, this, context));
+	}
+
+	processReadingModeSourceBlockBadges(element: HTMLElement, context: MarkdownPostProcessorContext) {
+		const file = this.app.vault.getAbstractFileByPath(context.sourcePath);
+		if (!(file instanceof TFile)) {
+			return;
+		}
+
+		const sectionInfo = context.getSectionInfo(element);
+		if (!sectionInfo) {
+			return;
+		}
+
+		const cache = this.app.metadataCache.getFileCache(file);
+		const listItems = this.getListItemsForSection(cache, sectionInfo.lineStart, sectionInfo.lineEnd);
+		if (listItems.length === 0) {
+			return;
+		}
+
+		const listElements = Array.from(element.querySelectorAll('li')).filter((listItem) => {
+			return listItem.closest(`[${MANAGED_NODE_ATTR}="true"]`) === null;
+		});
+		if (listElements.length === 0) {
+			return;
+		}
+
+		element.querySelectorAll('.block-reference-source-badge-anchor').forEach((badge) => badge.remove());
+
+		const visibleSourceBlocks = this.indexService
+			.getBlocksForFile(context.sourcePath)
+			.filter(({ block, id }) => {
+				return block.startLine >= sectionInfo.lineStart
+					&& block.startLine <= sectionInfo.lineEnd
+					&& this.indexService.getReferenceCount(id) > 0;
+			});
+
+		if (visibleSourceBlocks.length === 0) {
+			return;
+		}
+
+		const listItemCount = Math.min(listItems.length, listElements.length);
+		const listItemByLine = new Map<number, HTMLLIElement>();
+		for (let index = 0; index < listItemCount; index++) {
+			listItemByLine.set(listItems[index].position.start.line, listElements[index]);
+		}
+
+		for (const { id, block } of visibleSourceBlocks) {
+			const listItem = listItemByLine.get(block.startLine);
+			if (!listItem) {
+				continue;
+			}
+
+			const count = this.indexService.getReferenceCount(id);
+			if (count <= 0) {
+				continue;
+			}
+
+			this.attachReadingModeSourceBadge(listItem, block, count);
+		}
+	}
+
+	async toggleSourceReferencePopover(
+		anchorEl: HTMLElement,
+		blockId: string,
+		sourceFilePath?: string,
+		sourceStartLine?: number,
+	) {
+		const activeBlock = this.indexService.getBlock(blockId);
+		if (!activeBlock || activeBlock.status !== 'active') {
+			return;
+		}
+
+		if (this.indexService.getReferenceCount(blockId) <= 0) {
+			return;
+		}
+
+		const sourceBlock = sourceFilePath && typeof sourceStartLine === 'number'
+			? this.indexService.findBlockByFileAndLine(sourceFilePath, sourceStartLine)?.block
+			: null;
+
+		await this.sourceReferencePopover?.toggle(anchorEl, blockId, sourceBlock ?? activeBlock);
+	}
+
+	getBlockSummary(block: BlockCache): string {
+		const firstLine = block.rawContent.split(/\r?\n/, 1)[0]?.trim();
+		return firstLine && firstLine.length > 0 ? firstLine : '[empty block]';
+	}
+
+	async getReferencePreview(reference: BlockReferenceLocation, maxLength = 140): Promise<string> {
+		const file = this.app.vault.getAbstractFileByPath(reference.filePath);
+		if (!(file instanceof TFile)) {
+			return '[file not found]';
+		}
+
+		const cached = this.referencePreviewCache.get(reference.filePath);
+		let lines: string[];
+		if (cached && cached.mtime === file.stat.mtime) {
+			lines = cached.lines;
+		} else {
+			const content = await this.app.vault.cachedRead(file);
+			lines = content.split(/\r?\n/);
+			this.referencePreviewCache.set(reference.filePath, {
+				mtime: file.stat.mtime,
+				lines,
+			});
+		}
+
+		const line = lines[reference.line]?.trim() ?? '';
+		if (!line) {
+			return '[empty line]';
+		}
+
+		return line.length > maxLength ? `${line.slice(0, maxLength).trimEnd()}…` : line;
+	}
+
+	async openReferenceLocation(reference: BlockReferenceLocation) {
+		const file = this.app.vault.getAbstractFileByPath(reference.filePath);
+		if (!(file instanceof TFile)) {
+			new Notice('Unable to open the referenced file.');
+			return;
+		}
+
+		const leaf = this.app.workspace.getMostRecentLeaf() ?? this.app.workspace.getLeaf(true);
+		await leaf.openFile(file, { active: true });
+		await this.app.workspace.revealLeaf(leaf);
+
+		if (leaf.view instanceof MarkdownView) {
+			const position = { line: reference.line, ch: reference.ch };
+			leaf.view.editor.setCursor(position);
+			leaf.view.editor.scrollIntoView({ from: position, to: position }, true);
+			leaf.view.editor.focus();
+		}
 	}
 
 	async recoverBlockToRecoveryPage(id: string) {
@@ -942,6 +1126,59 @@ export default class BlockReferenceEnhancer extends Plugin {
 
 		this.statusBarEl.style.display = '';
 		this.statusBarEl.setText(message);
+	}
+
+	private getListItemsForSection(cache: CachedMetadata | null, lineStart: number, lineEnd: number): ListItemCache[] {
+		return (cache?.listItems ?? [])
+			.filter((item) => item.position.start.line >= lineStart && item.position.start.line <= lineEnd)
+			.sort((left, right) => {
+				return left.position.start.line - right.position.start.line
+					|| left.position.start.col - right.position.start.col;
+			});
+	}
+
+	private attachReadingModeSourceBadge(listItem: HTMLLIElement, block: BlockCache, count: number) {
+		const blockId = block.id;
+		const existing = listItem.querySelector(`.block-reference-source-badge[data-block-ref-source-id="${CSS.escape(blockId)}"]`);
+		if (existing instanceof HTMLElement) {
+			existing.dataset.blockRefSourceCount = String(count);
+			existing.dataset.blockRefSourceFilePath = block.filePath;
+			existing.dataset.blockRefSourceStartLine = String(block.startLine);
+			existing.setAttribute('aria-label', `Referenced ${count} times`);
+			existing.setAttribute('title', `${count} references`);
+			existing.setText(String(count));
+			return;
+		}
+
+		const anchor = document.createElement('span');
+		anchor.className = 'block-reference-source-badge-anchor';
+		anchor.appendChild(createSourceReferenceBadgeElement(blockId, count, block.filePath, block.startLine));
+
+		const contentHost = this.getReadingModeBadgeContentHost(listItem);
+		if (contentHost) {
+			contentHost.appendChild(anchor);
+			return;
+		}
+
+		const firstNestedList = Array.from(listItem.children).find((child) => child.tagName === 'UL' || child.tagName === 'OL');
+		if (firstNestedList) {
+			listItem.insertBefore(anchor, firstNestedList);
+			return;
+		}
+
+		listItem.appendChild(anchor);
+	}
+
+	private getReadingModeBadgeContentHost(listItem: HTMLLIElement): HTMLElement | null {
+		for (const child of Array.from(listItem.children)) {
+			if (child.matches('ul, ol, .block-reference-source-badge-anchor')) {
+				continue;
+			}
+
+			return child as HTMLElement;
+		}
+
+		return null;
 	}
 
 	private refreshOpenMarkdownViews() {

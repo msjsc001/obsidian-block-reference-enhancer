@@ -7,13 +7,15 @@ import {
     IndexProgress,
     IndexStatus,
     LegacyPersistedBlockCacheEntry,
+    PaginatedBlockReferences,
     ParsedMarkdownFile,
-    PersistedIndexCacheV2,
+    PersistedIndexCacheV3,
+    SourceBlockRecord,
     StaleBlockRecord,
 } from '../types';
 import { BlockParser } from './BlockParser';
 
-const CACHE_SCHEMA_VERSION = 2;
+const CACHE_SCHEMA_VERSION = 3;
 const RECOVERY_PAGE_PATH = 'pages/Block Recovery.md';
 
 interface BuildOptions {
@@ -46,6 +48,8 @@ export class IndexService extends Events {
     private blocksById = new Map<string, BlockCache>();
     private refsById = new Map<string, BlockReferenceLocation[]>();
     private fileMetaByPath = new Map<string, FileIndexMeta>();
+    private sourceBlocksByFile = new Map<string, BlockCache[]>();
+    private activeSourceBlocksById = new Map<string, BlockCache[]>();
     private indexRevision = 0;
     private operationQueue: Promise<unknown> = Promise.resolve();
 
@@ -116,6 +120,7 @@ export class IndexService extends Events {
         await this.queueOperation(async () => {
             const normalizedNewPath = normalizePath(newPath);
             const fileMeta = this.fileMetaByPath.get(oldPath);
+            const sourceBlocks = this.sourceBlocksByFile.get(oldPath) ?? [];
             let didChange = false;
 
             if (fileMeta) {
@@ -124,6 +129,17 @@ export class IndexService extends Events {
                     ...fileMeta,
                     path: normalizedNewPath,
                 });
+                didChange = true;
+            }
+
+            if (sourceBlocks.length > 0) {
+                this.sourceBlocksByFile.delete(oldPath);
+                const renamedBlocks = sourceBlocks.map((block) => ({
+                    ...block,
+                    filePath: normalizedNewPath,
+                }));
+                this.sourceBlocksByFile.set(normalizedNewPath, renamedBlocks);
+                this.rebuildActiveSourceBlocksById();
                 didChange = true;
             }
 
@@ -145,6 +161,10 @@ export class IndexService extends Events {
 
             if (!didChange) {
                 return;
+            }
+
+            for (const block of sourceBlocks) {
+                this.refreshCanonicalBlock(block.id);
             }
 
             this.scheduleSave();
@@ -175,6 +195,30 @@ export class IndexService extends Events {
 
     public getReferenceCount(id: string): number {
         return this.refsById.get(id)?.length ?? 0;
+    }
+
+    public getBlocksForFile(filePath: string): SourceBlockRecord[] {
+        const blocks = this.sourceBlocksByFile.get(filePath) ?? [];
+        return blocks
+            .map((block) => ({ id: block.id, block }))
+            .sort((left, right) => left.block.startLine - right.block.startLine || left.id.localeCompare(right.id));
+    }
+
+    public getPaginatedReferencesToBlock(id: string, page: number, pageSize: number): PaginatedBlockReferences {
+        const normalizedPageSize = Math.max(1, pageSize);
+        const references = this.getReferencesToBlock(id);
+        const total = references.length;
+        const maxPage = total === 0 ? 0 : Math.max(Math.ceil(total / normalizedPageSize) - 1, 0);
+        const normalizedPage = Math.max(0, Math.min(page, maxPage));
+        const start = normalizedPage * normalizedPageSize;
+        const end = start + normalizedPageSize;
+
+        return {
+            page: normalizedPage,
+            pageSize: normalizedPageSize,
+            total,
+            references: references.slice(start, end),
+        };
     }
 
     public getStaleBlocks(): StaleBlockRecord[] {
@@ -240,13 +284,10 @@ export class IndexService extends Events {
     }
 
     public findBlockByFileAndLine(filePath: string, line: number): { id: string, block: BlockCache } | null {
-        for (const [id, block] of this.blocksById.entries()) {
-            if (block.status !== 'active') {
-                continue;
-            }
-
-            if (block.filePath === filePath && block.startLine === line) {
-                return { id, block };
+        const blocks = this.sourceBlocksByFile.get(filePath) ?? [];
+        for (const block of blocks) {
+            if (block.startLine === line) {
+                return { id: block.id, block };
             }
         }
 
@@ -257,7 +298,7 @@ export class IndexService extends Events {
         const now = Date.now();
         const existing = this.blocksById.get(id);
 
-        this.blocksById.set(id, {
+        const nextBlock: BlockCache = {
             id,
             filePath: block.filePath,
             rawContent: block.rawContent,
@@ -269,7 +310,11 @@ export class IndexService extends Events {
             firstSeenAt: existing?.firstSeenAt ?? now,
             lastSeenAt: now,
             recoveredAt: existing?.status === 'stale' ? now : existing?.recoveredAt,
-        });
+        };
+
+        this.blocksById.set(id, nextBlock);
+        this.upsertSourceBlockForFile(nextBlock.filePath, nextBlock);
+        this.upsertActiveSourceBlock(nextBlock);
 
         this.scheduleSave();
         this.notifyIndexUpdated();
@@ -321,9 +366,10 @@ export class IndexService extends Events {
     private async rebuildIndexInternal({ phase, onProgress }: BuildOptions): Promise<IndexBuildStats> {
         const previousBlocks = new Map(this.blocksById);
         const markdownFiles = this.app.vault.getMarkdownFiles();
-        const nextBlocks = new Map<string, BlockCache>();
         const nextRefs = new Map<string, BlockReferenceLocation[]>();
         const nextFileMeta = new Map<string, FileIndexMeta>();
+        const nextSourceBlocksByFile = new Map<string, BlockCache[]>();
+        const nextActiveSourceBlocksById = new Map<string, BlockCache[]>();
         let processedFiles = 0;
 
         this.emitProgress({
@@ -336,19 +382,32 @@ export class IndexService extends Events {
 
         for (const file of markdownFiles) {
             const parsed = await this.parseFile(file);
-            this.populateStateFromParsedFile(nextBlocks, nextRefs, nextFileMeta, file, parsed, previousBlocks);
+            this.populateStateFromParsedFile(
+                nextRefs,
+                nextFileMeta,
+                nextSourceBlocksByFile,
+                nextActiveSourceBlocksById,
+                file,
+                parsed,
+                previousBlocks,
+            );
 
             processedFiles++;
             if (processedFiles % 50 === 0 || processedFiles === markdownFiles.length) {
                 this.emitProgress({
                     processedFiles,
                     totalFiles: markdownFiles.length,
-                    blockCount: this.countActiveBlocks(nextBlocks),
+                    blockCount: nextActiveSourceBlocksById.size,
                     referenceCount: this.countReferenceLocations(nextRefs),
                     phase,
                 }, onProgress);
                 await this.yieldToMainThread();
             }
+        }
+
+        const nextBlocks = new Map<string, BlockCache>();
+        for (const [id, activeSourceBlocks] of nextActiveSourceBlocksById.entries()) {
+            nextBlocks.set(id, this.buildCanonicalActiveBlock(id, activeSourceBlocks, previousBlocks.get(id)));
         }
 
         for (const [id, previousBlock] of previousBlocks.entries()) {
@@ -374,6 +433,8 @@ export class IndexService extends Events {
         this.blocksById = nextBlocks;
         this.refsById = nextRefs;
         this.fileMetaByPath = nextFileMeta;
+        this.sourceBlocksByFile = nextSourceBlocksByFile;
+        this.activeSourceBlocksById = nextActiveSourceBlocksById;
         await this.saveIndexToCache();
         this.notifyIndexUpdated();
         return this.getStats();
@@ -483,36 +544,41 @@ export class IndexService extends Events {
     private async processFileChangeInternal(file: TFile, emitUpdate: boolean): Promise<boolean> {
         const parsed = await this.parseFile(file);
         const previousMeta = this.fileMetaByPath.get(file.path);
-        const previousBlockIds = new Set(previousMeta?.blockIds ?? []);
         const previousBlocks = new Map<string, BlockCache>();
+        const affectedIds = new Set<string>();
 
-        for (const blockId of previousBlockIds) {
+        for (const blockId of previousMeta?.blockIds ?? []) {
             const existing = this.blocksById.get(blockId);
             if (existing) {
                 previousBlocks.set(blockId, existing);
             }
-            this.blocksById.delete(blockId);
+            affectedIds.add(blockId);
+        }
+
+        const removedSourceBlocks = this.removeSourceBlocksForFileInternal(file.path);
+        for (const block of removedSourceBlocks) {
+            affectedIds.add(block.id);
         }
 
         this.removeReferencesForFile(file.path, previousMeta?.referencedIds ?? []);
         this.fileMetaByPath.delete(file.path);
 
-        this.populateStateFromParsedFile(this.blocksById, this.refsById, this.fileMetaByPath, file, parsed, previousBlocks);
+        this.populateStateFromParsedFile(
+            this.refsById,
+            this.fileMetaByPath,
+            this.sourceBlocksByFile,
+            this.activeSourceBlocksById,
+            file,
+            parsed,
+            previousBlocks,
+        );
 
-        const nextBlockIds = new Set([...parsed.blocks.keys()]);
-        for (const [blockId, previousBlock] of previousBlocks.entries()) {
-            if (nextBlockIds.has(blockId)) {
-                continue;
-            }
+        for (const blockId of parsed.blocks.keys()) {
+            affectedIds.add(blockId);
+        }
 
-            const references = this.refsById.get(blockId);
-            if (references && references.length > 0) {
-                this.blocksById.set(blockId, {
-                    ...previousBlock,
-                    status: 'stale',
-                    lostAt: previousBlock.lostAt ?? Date.now(),
-                });
-            }
+        for (const blockId of affectedIds) {
+            this.refreshCanonicalBlock(blockId, previousBlocks.get(blockId));
         }
 
         const didChange = true;
@@ -532,46 +598,36 @@ export class IndexService extends Events {
 
         this.fileMetaByPath.delete(filePath);
         this.removeReferencesForFile(filePath, fileMeta.referencedIds);
+        const removedSourceBlocks = this.removeSourceBlocksForFileInternal(filePath);
+        const affectedIds = new Set<string>(fileMeta.blockIds);
 
-        let didChange = false;
-        for (const blockId of fileMeta.blockIds) {
-            const block = this.blocksById.get(blockId);
-            if (!block) {
-                continue;
-            }
-
-            didChange = true;
-            const references = this.refsById.get(blockId);
-            if (references && references.length > 0) {
-                this.blocksById.set(blockId, {
-                    ...block,
-                    status: 'stale',
-                    lostAt: block.lostAt ?? Date.now(),
-                });
-                continue;
-            }
-
-            this.blocksById.delete(blockId);
+        for (const block of removedSourceBlocks) {
+            affectedIds.add(block.id);
         }
 
-        return didChange;
+        for (const blockId of affectedIds) {
+            this.refreshCanonicalBlock(blockId);
+        }
+
+        return affectedIds.size > 0 || fileMeta.referencedIds.length > 0;
     }
 
     private populateStateFromParsedFile(
-        targetBlocks: Map<string, BlockCache>,
         targetRefs: Map<string, BlockReferenceLocation[]>,
         targetFileMeta: Map<string, FileIndexMeta>,
+        targetSourceBlocksByFile: Map<string, BlockCache[]>,
+        targetActiveSourceBlocksById: Map<string, BlockCache[]>,
         file: TFile,
         parsed: ParsedMarkdownFile,
         previousBlocks: Map<string, BlockCache>
     ) {
         const now = Date.now();
-        const blockIds = [...parsed.blocks.keys()];
+        const blockIds: string[] = [];
         const referencedIds = [...parsed.referencesById.keys()];
 
         for (const [id, parsedBlock] of parsed.blocks.entries()) {
-            const previousBlock = previousBlocks.get(id) ?? targetBlocks.get(id);
-            targetBlocks.set(id, {
+            const previousBlock = previousBlocks.get(id) ?? this.blocksById.get(id);
+            const normalizedBlock: BlockCache = {
                 ...parsedBlock,
                 id,
                 status: 'active',
@@ -579,7 +635,10 @@ export class IndexService extends Events {
                 lastSeenAt: now,
                 lostAt: undefined,
                 recoveredAt: previousBlock?.status === 'stale' ? now : previousBlock?.recoveredAt,
-            });
+            };
+            blockIds.push(id);
+            this.upsertSourceBlockForFile(file.path, normalizedBlock, targetSourceBlocksByFile);
+            this.upsertActiveSourceBlock(normalizedBlock, targetActiveSourceBlocksById);
         }
 
         for (const [id, references] of parsed.referencesById.entries()) {
@@ -634,7 +693,7 @@ export class IndexService extends Events {
             }
 
             const data = await this.app.vault.adapter.read(this.CACHE_FILE_PATH);
-            const parsed = JSON.parse(data) as PersistedIndexCacheV2 | LegacyPersistedBlockCacheEntry[];
+            const parsed = JSON.parse(data) as PersistedIndexCacheV3 | LegacyPersistedBlockCacheEntry[];
 
             if (Array.isArray(parsed)) {
                 this.loadLegacyCache(parsed);
@@ -655,6 +714,13 @@ export class IndexService extends Events {
             this.fileMetaByPath = new Map(
                 Object.entries(parsed.files).map(([path, meta]) => [path, { ...meta }])
             );
+            this.sourceBlocksByFile = new Map(
+                Object.entries(parsed.sourceBlocksByFile).map(([path, blocks]) => [
+                    path,
+                    blocks.map((block) => this.normalizeLoadedBlock(block.id, block)),
+                ])
+            );
+            this.rebuildActiveSourceBlocksById();
             this.notifyIndexUpdated();
             return true;
         } catch (error) {
@@ -668,9 +734,11 @@ export class IndexService extends Events {
         this.blocksById = new Map();
         this.refsById = new Map();
         this.fileMetaByPath = new Map();
+        this.sourceBlocksByFile = new Map();
+        this.activeSourceBlocksById = new Map();
 
         for (const [id, block] of entries as unknown as [string, LegacyPersistedBlockCacheEntry[1]][]) {
-            this.blocksById.set(id, {
+            const loadedBlock: BlockCache = {
                 id,
                 filePath: block.filePath,
                 rawContent: block.rawContent,
@@ -681,7 +749,10 @@ export class IndexService extends Events {
                 status: 'active',
                 firstSeenAt: now,
                 lastSeenAt: now,
-            });
+            };
+            this.blocksById.set(id, loadedBlock);
+            this.upsertSourceBlockForFile(block.filePath, loadedBlock);
+            this.upsertActiveSourceBlock(loadedBlock);
         }
     }
 
@@ -696,14 +767,144 @@ export class IndexService extends Events {
         };
     }
 
+    private upsertSourceBlockForFile(
+        filePath: string,
+        block: BlockCache,
+        targetSourceBlocksByFile: Map<string, BlockCache[]> = this.sourceBlocksByFile,
+    ) {
+        const existingBlocks = targetSourceBlocksByFile.get(filePath) ?? [];
+        const nextBlocks = existingBlocks.filter((existingBlock) => !this.isSameSourceBlock(existingBlock, block));
+        nextBlocks.push({ ...block });
+        nextBlocks.sort((left, right) => left.startLine - right.startLine || left.id.localeCompare(right.id));
+        targetSourceBlocksByFile.set(filePath, nextBlocks);
+    }
+
+    private removeSourceBlocksForFileInternal(filePath: string): BlockCache[] {
+        const blocks = this.sourceBlocksByFile.get(filePath) ?? [];
+        if (blocks.length === 0) {
+            return [];
+        }
+
+        this.sourceBlocksByFile.delete(filePath);
+        for (const block of blocks) {
+            const activeBlocks = this.activeSourceBlocksById.get(block.id);
+            if (!activeBlocks) {
+                continue;
+            }
+
+            const nextBlocks = activeBlocks.filter((existingBlock) => !this.isSameSourceBlock(existingBlock, block));
+            if (nextBlocks.length === 0) {
+                this.activeSourceBlocksById.delete(block.id);
+                continue;
+            }
+
+            this.activeSourceBlocksById.set(block.id, nextBlocks);
+        }
+
+        return blocks;
+    }
+
+    private upsertActiveSourceBlock(
+        block: BlockCache,
+        targetActiveSourceBlocksById: Map<string, BlockCache[]> = this.activeSourceBlocksById,
+    ) {
+        const existingBlocks = targetActiveSourceBlocksById.get(block.id) ?? [];
+        const nextBlocks = existingBlocks.filter((existingBlock) => !this.isSameSourceBlock(existingBlock, block));
+        nextBlocks.push({ ...block });
+        nextBlocks.sort((left, right) => {
+            return left.filePath.localeCompare(right.filePath)
+                || left.startLine - right.startLine
+                || (left.endLine ?? left.startLine) - (right.endLine ?? right.startLine);
+        });
+        targetActiveSourceBlocksById.set(block.id, nextBlocks);
+    }
+
+    private rebuildActiveSourceBlocksById() {
+        const nextActiveSourceBlocksById = new Map<string, BlockCache[]>();
+
+        for (const blocks of this.sourceBlocksByFile.values()) {
+            for (const block of blocks) {
+                this.upsertActiveSourceBlock(block, nextActiveSourceBlocksById);
+            }
+        }
+
+        this.activeSourceBlocksById = nextActiveSourceBlocksById;
+    }
+
+    private refreshCanonicalBlock(id: string, previousBlock?: BlockCache) {
+        const activeSourceBlocks = this.activeSourceBlocksById.get(id);
+        if (activeSourceBlocks && activeSourceBlocks.length > 0) {
+            this.blocksById.set(id, this.buildCanonicalActiveBlock(id, activeSourceBlocks, previousBlock));
+            return;
+        }
+
+        const existingBlock = previousBlock ?? this.blocksById.get(id);
+        if (!existingBlock) {
+            return;
+        }
+
+        if (existingBlock.status === 'confirmed_deleted') {
+            this.blocksById.set(id, existingBlock);
+            return;
+        }
+
+        const references = this.refsById.get(id);
+        if (references && references.length > 0) {
+            this.blocksById.set(id, {
+                ...existingBlock,
+                status: 'stale',
+                lostAt: existingBlock.lostAt ?? Date.now(),
+            });
+            return;
+        }
+
+        this.blocksById.delete(id);
+    }
+
+    private buildCanonicalActiveBlock(id: string, activeSourceBlocks: BlockCache[], previousBlock?: BlockCache): BlockCache {
+        const sourceBlock = this.pickCanonicalSourceBlock(activeSourceBlocks, previousBlock);
+        const now = Date.now();
+
+        return {
+            ...sourceBlock,
+            id,
+            status: 'active',
+            firstSeenAt: previousBlock?.firstSeenAt ?? sourceBlock.firstSeenAt ?? now,
+            lastSeenAt: now,
+            lostAt: undefined,
+            recoveredAt: previousBlock?.status === 'stale' ? now : previousBlock?.recoveredAt,
+        };
+    }
+
+    private pickCanonicalSourceBlock(activeSourceBlocks: BlockCache[], previousBlock?: BlockCache): BlockCache {
+        if (previousBlock) {
+            const matchingBlock = activeSourceBlocks.find((block) => this.isSameSourceBlock(block, previousBlock));
+            if (matchingBlock) {
+                return matchingBlock;
+            }
+        }
+
+        return activeSourceBlocks[0];
+    }
+
+    private isSameSourceBlock(left: BlockCache, right: BlockCache): boolean {
+        return left.id === right.id
+            && left.filePath === right.filePath
+            && left.startLine === right.startLine
+            && (left.endLine ?? left.startLine) === (right.endLine ?? right.startLine);
+    }
+
     private async saveIndexToCache() {
         try {
-            const persisted: PersistedIndexCacheV2 = {
+            const persisted: PersistedIndexCacheV3 = {
                 schemaVersion: CACHE_SCHEMA_VERSION,
                 builtAt: Date.now(),
                 files: Object.fromEntries(this.fileMetaByPath.entries()),
                 blocks: Object.fromEntries(this.blocksById.entries()),
                 refsById: Object.fromEntries(this.refsById.entries()),
+                sourceBlocksByFile: Object.fromEntries(
+                    [...this.sourceBlocksByFile.entries()].map(([path, blocks]) => [path, blocks.map((block) => ({ ...block }))])
+                ),
             };
             await this.app.vault.adapter.write(this.CACHE_FILE_PATH, JSON.stringify(persisted));
         } catch (error) {

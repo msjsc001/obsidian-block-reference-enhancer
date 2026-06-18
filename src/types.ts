@@ -38,12 +38,13 @@ export interface ParsedMarkdownFile {
     referencesById: Map<string, BlockReferenceLocation[]>;
 }
 
-export interface PersistedIndexCacheV2 {
-    schemaVersion: 2;
+export interface PersistedIndexCacheV3 {
+    schemaVersion: 3;
     builtAt: number;
     files: Record<string, FileIndexMeta>;
     blocks: Record<string, BlockCache>;
     refsById: Record<string, BlockReferenceLocation[]>;
+    sourceBlocksByFile: Record<string, BlockCache[]>;
 }
 
 export interface LegacyPersistedBlockCacheEntry {
@@ -88,5 +89,17 @@ export interface IndexStatus {
 export interface StaleBlockRecord {
     id: string;
     block: BlockCache;
+    references: BlockReferenceLocation[];
+}
+
+export interface SourceBlockRecord {
+    id: string;
+    block: BlockCache;
+}
+
+export interface PaginatedBlockReferences {
+    page: number;
+    pageSize: number;
+    total: number;
     references: BlockReferenceLocation[];
 }
