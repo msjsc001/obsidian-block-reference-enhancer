@@ -1,7 +1,12 @@
 export function replaceChildrenFromHtml(target: HTMLElement, html: string) {
-    const range = document.createRange();
-    range.selectNodeContents(target);
-    const fragment = range.createContextualFragment(html);
+    const parser = new DOMParser();
+    const parsed = parser.parseFromString(`<body>${html}</body>`, "text/html");
+    const fragment = target.ownerDocument.createDocumentFragment();
+
+    for (const node of Array.from(parsed.body.childNodes)) {
+        fragment.appendChild(target.ownerDocument.importNode(node, true));
+    }
+
     target.replaceChildren(fragment);
 }
 

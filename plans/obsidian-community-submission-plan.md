@@ -10,15 +10,15 @@ Submit `Block Reference Enhancer` to the official Obsidian community plugin dire
 - Plugin repository is `msjsc001/obsidian-block-reference-enhancer`.
 - Manifest ID is `block-reference-enhancer`.
 - Display name is `Block Reference Enhancer`.
-- Current release version is `1.1.2`.
-- Release tag `1.1.2` is the aligned submission release.
-- GitHub Release `1.1.2` is the aligned submission release and includes:
+- Current release version is `1.1.3`.
+- Release tag `1.1.3` is the aligned submission release.
+- GitHub Release `1.1.3` is the aligned submission release and includes:
   - `main.js`
   - `manifest.json`
   - `styles.css`
 - The submission helper files in this folder are:
   - `community-plugin-entry.block-reference-enhancer.json`
-  - `obsidian-community-submission-pr-body-1.1.2.md`
+  - `obsidian-community-submission-pr-body-1.1.3.md`
 
 ## Current Product Decisions
 
@@ -64,8 +64,8 @@ The same JSON is stored in `community-plugin-entry.block-reference-enhancer.json
 
 The GitHub release for the aligned submission version is:
 
-- Tag name: `1.1.2`
-- Release title: `1.1.2`
+- Tag name: `1.1.3`
+- Release title: `1.1.3`
 - No `v` prefix
 - Assets uploaded:
   - `main.js`
@@ -75,7 +75,7 @@ The GitHub release for the aligned submission version is:
 Release URL:
 
 ```text
-https://github.com/msjsc001/obsidian-block-reference-enhancer/releases/tag/1.1.2
+https://github.com/msjsc001/obsidian-block-reference-enhancer/releases/tag/1.1.3
 ```
 
 ## Actual Submission Path To Use
@@ -100,7 +100,7 @@ The following submission work is already done:
 3. Entry ordering handled:
    - the plugin entry was appended at the end of the list, matching common submission practice
 4. PR body prepared:
-   - see `obsidian-community-submission-pr-body-1.1.2.md`
+   - see `obsidian-community-submission-pr-body-1.1.3.md`
 
 ## Current Blocker
 
@@ -129,7 +129,7 @@ Once a broader GitHub authentication context is available, open the PR with:
 - base branch: `master`
 - head branch: `msjsc001:master`
 - title: `Add plugin: Block Reference Enhancer`
-- body file: `obsidian-community-submission-pr-body-1.1.2.md`
+- body file: `obsidian-community-submission-pr-body-1.1.3.md`
 
 Direct compare URL:
 

@@ -1167,7 +1167,6 @@ export default class BlockReferenceEnhancer extends Plugin {
 			return;
 		}
 
-		this.statusBarEl.style.display = '';
 		this.statusBarEl.setText(message);
 	}
 
