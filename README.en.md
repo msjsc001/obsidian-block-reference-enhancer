@@ -129,4 +129,6 @@ npm run build
 
 Future versions may support assigning UUIDs directly to individual Obsidian list blocks, so block references and block embeds can be authored natively inside Obsidian.
 
+Future versions may also add a plugin-provided search view for expanded block-reference and block-embed content, so searches can work against the real UUID-backed block content instead of only the raw `((uuid))` / `{{embed ((uuid))}}` syntax stored in notes.
+
 More block-related features may also be added over time as the plugin evolves.
