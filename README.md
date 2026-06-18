@@ -2,7 +2,7 @@
 
 Simplified Chinese documentation is available in [README.zh-CN.md](./README.zh-CN.md).
 
-<img alt="20210606180518" src="https://github.com/user-attachments/assets/24556d2d-cca1-4913-a6b6-8e9e3418304a" />
+<img alt="20210606180518" src="https://github.com/user-attachments/assets/dbb64e41-f922-483f-9cf3-27916a57aa5b" />
 
 <img alt="Screenshot" src="https://github.com/user-attachments/assets/b69b1a35-7e31-4cf2-ae20-73ce725e7046" />
 
