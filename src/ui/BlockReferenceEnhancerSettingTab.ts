@@ -25,7 +25,7 @@ export class BlockReferenceEnhancerSettingTab extends PluginSettingTab {
 		const doc = getDocument(containerEl);
 
 		new Setting(containerEl)
-			.setName('Block Reference Enhancer')
+			.setName('Property hiding')
 			.setHeading();
 
 		new Setting(containerEl)
