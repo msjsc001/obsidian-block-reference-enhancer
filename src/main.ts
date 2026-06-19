@@ -1,4 +1,4 @@
-import { CachedMetadata, Component, Editor, ListItemCache, MarkdownPostProcessorContext, MarkdownRenderChild, MarkdownRenderer, MarkdownView, Notice, Plugin, TFile } from 'obsidian';
+import { CachedMetadata, Component, Editor, ListItemCache, MarkdownPostProcessorContext, MarkdownRenderChild, MarkdownRenderer, MarkdownView, Menu, Notice, Plugin, TFile } from 'obsidian';
 import { IndexService } from './services/IndexService';
 import { BlockSuggest } from './editor/BlockSuggest';
 import { blockReferenceField } from './editor/BlockReferenceField';
@@ -7,6 +7,7 @@ import { createSourceReferenceBadgePlugin } from './editor/SourceReferenceBadgeP
 import { BlockCache, BlockReferenceLocation, IndexBuildStats, IndexProgress, IndexStatus, LegacyPersistedBlockCacheEntry, PersistedIndexCacheV3 } from './types';
 import { StaleBlockReviewModal } from './ui/StaleBlockReviewModal';
 import { createSourceReferenceBadgeElement } from './ui/SourceReferenceBadgeElement';
+import { createSourceBlockBackButtonElement } from './ui/SourceBlockBackButtonElement';
 import { SourceReferencePopover } from './ui/SourceReferencePopover';
 import { isHtmlElement } from './utils/dom';
 import { serializeChildrenToHtml } from './utils/html';
@@ -102,6 +103,28 @@ export default class BlockReferenceEnhancer extends Plugin {
 	private sourceReferencePopover: SourceReferencePopover | null = null;
 	private persistedData: BlockReferenceEnhancerPersistedData = {};
 
+	private getBackButtonHost(target: HTMLElement): HTMLElement | null {
+		const host = target.closest('.block-reference-inline-ref, .block-reference-embed');
+		return isHtmlElement(host) ? host : null;
+	}
+
+	private clearPinnedBackButtons(except?: HTMLElement | null) {
+		activeDocument.querySelectorAll('.is-back-pinned').forEach((element) => {
+			if (except && element === except) {
+				return;
+			}
+
+			if (isHtmlElement(element)) {
+				element.removeClass('is-back-pinned');
+			}
+		});
+	}
+
+	private pinBackButtonHost(host: HTMLElement) {
+		this.clearPinnedBackButtons(host);
+		host.addClass('is-back-pinned');
+	}
+
 	async onload() {
 		await this.loadSettings();
 
@@ -137,6 +160,14 @@ export default class BlockReferenceEnhancer extends Plugin {
 		});
 
 		this.addCommand({
+			id: 'copy-current-block-embed',
+			name: 'Copy current block embed',
+			editorCallback: (editor: Editor, view: MarkdownView) => {
+				void this.handleCopyBlockEmbed(editor, view);
+			},
+		});
+
+		this.addCommand({
 			id: 'review-missing-source-blocks',
 			name: 'Review missing source blocks',
 			callback: () => {
@@ -152,6 +183,25 @@ export default class BlockReferenceEnhancer extends Plugin {
 			const target = event.target;
 			if (!isHtmlElement(target)) {
 				return;
+			}
+
+			const backButton = target.closest('.block-reference-back-button');
+			if (isHtmlElement(backButton)) {
+				const host = this.getBackButtonHost(backButton);
+				if (host) {
+					this.pinBackButtonHost(host);
+				}
+
+				event.preventDefault();
+				event.stopPropagation();
+				return;
+			}
+
+			const backHost = this.getBackButtonHost(target);
+			if (backHost) {
+				this.pinBackButtonHost(backHost);
+			} else {
+				this.clearPinnedBackButtons();
 			}
 
 			const badge = target.closest('.block-reference-source-badge');
@@ -175,9 +225,34 @@ export default class BlockReferenceEnhancer extends Plugin {
 				blockId,
 				sourceFilePath,
 				typeof parsedSourceStartLine === 'number' && Number.isFinite(parsedSourceStartLine)
-					? parsedSourceStartLine
+				? parsedSourceStartLine
 					: undefined,
 			);
+		}, true);
+
+		this.registerDomEvent(activeDocument, 'click', (event) => {
+			if (event.button !== 0) {
+				return;
+			}
+
+			const target = event.target;
+			if (!isHtmlElement(target)) {
+				return;
+			}
+
+			const backButton = target.closest('.block-reference-back-button');
+			if (!isHtmlElement(backButton)) {
+				return;
+			}
+
+			const blockId = backButton.dataset.blockRefSourceId;
+			if (!blockId) {
+				return;
+			}
+
+			event.preventDefault();
+			event.stopPropagation();
+			void this.openSourceBlockFromBackButton(blockId, event);
 		}, true);
 
 		this.app.workspace.onLayoutReady(() => {
@@ -272,8 +347,69 @@ export default class BlockReferenceEnhancer extends Plugin {
 	}
 
 	async handleCopyBlockReference(editor: Editor, view: MarkdownView) {
+		await this.copyCurrentBlockSyntax(editor, view, 'reference');
+	}
+
+	async handleCopyBlockEmbed(editor: Editor, view: MarkdownView) {
+		await this.copyCurrentBlockSyntax(editor, view, 'embed');
+	}
+
+	private async copyCurrentBlockSyntax(editor: Editor, view: MarkdownView, syntax: 'reference' | 'embed') {
+		const blockId = this.getOrCreateCurrentBlockId(editor, view);
+		if (!blockId) {
+			return;
+		}
+
+		if (!navigator.clipboard?.writeText) {
+			new Notice('Clipboard API unavailable on this platform.');
+			return;
+		}
+
+		const text = syntax === 'embed'
+			? `{{embed ((${blockId}))}}`
+			: `((${blockId}))`;
+		await navigator.clipboard.writeText(text);
+		new Notice(syntax === 'embed' ? 'Block embed copied to clipboard!' : 'Block reference copied to clipboard!');
+	}
+
+	private measureIndentColumns(value: string): number {
+		let columns = 0;
+		for (const char of value) {
+			columns += char === '\t' ? 4 : 1;
+		}
+
+		return columns;
+	}
+
+	private findExistingBlockIdInEditor(editor: Editor, blockLine: number): string | null {
+		const sourceLine = editor.getLine(blockLine);
+		const baseIndent = sourceLine.match(/^(\s*)/)?.[1] ?? '';
+		const baseIndentColumns = this.measureIndentColumns(baseIndent);
+
+		for (let line = blockLine + 1; line < editor.lineCount(); line++) {
+			const lineContent = editor.getLine(line);
+			if (lineContent.trim().length === 0) {
+				continue;
+			}
+
+			const indentation = lineContent.match(/^(\s*)/)?.[1] ?? '';
+			const indentationColumns = this.measureIndentColumns(indentation);
+			if (indentationColumns <= baseIndentColumns) {
+				break;
+			}
+
+			const idMatch = lineContent.match(/^\s*id::\s*([A-Za-z0-9_-]{36,})\s*$/);
+			if (idMatch) {
+				return idMatch[1];
+			}
+		}
+
+		return null;
+	}
+
+	private getOrCreateCurrentBlockId(editor: Editor, view: MarkdownView): string | null {
 		const file = view.file;
-		if (!file) return;
+		if (!file) return null;
 
 		const cursor = editor.getCursor();
 		const line = cursor.line;
@@ -282,39 +418,84 @@ export default class BlockReferenceEnhancer extends Plugin {
 		const blockMatch = lineContent.match(/^\s*-\s(.+)/);
 		if (!blockMatch) {
 			new Notice('This line is not a valid source block.');
-			return;
+			return null;
 		}
 
 		let existingBlock = this.indexService.findBlockByFileAndLine(file.path, line);
-		let blockId: string;
-
 		if (existingBlock) {
-			blockId = existingBlock.id;
-		} else {
-			blockId = crypto.randomUUID();
-			const indentationMatch = lineContent.match(/^(\s*)/);
-			const indentation = indentationMatch ? indentationMatch[1] : '';
-			const idLine = `\n${indentation}  id:: ${blockId}`;
-
-			editor.replaceRange(idLine, { line: line, ch: lineContent.length });
-
-			this.indexService.addBlock(blockId, {
-				filePath: file.path,
-				rawContent: blockMatch[1],
-				childrenMarkdown: '',
-				startLine: line,
-				endLine: line,
-				childrenIDs: [],
-			});
+			return existingBlock.id;
 		}
 
-		if (!navigator.clipboard?.writeText) {
-			new Notice('Clipboard API unavailable on this platform.');
+		const existingBlockId = this.findExistingBlockIdInEditor(editor, line);
+		if (existingBlockId) {
+			if (!this.indexService.getBlock(existingBlockId)) {
+				this.indexService.addBlock(existingBlockId, {
+					filePath: file.path,
+					rawContent: blockMatch[1],
+					childrenMarkdown: '',
+					startLine: line,
+					endLine: line,
+					childrenIDs: [],
+				});
+			}
+
+			return existingBlockId;
+		}
+
+		const blockId = crypto.randomUUID();
+		const indentationMatch = lineContent.match(/^(\s*)/);
+		const indentation = indentationMatch ? indentationMatch[1] : '';
+		const idLine = `\n${indentation}  id:: ${blockId}`;
+
+		editor.replaceRange(idLine, { line: line, ch: lineContent.length });
+
+		this.indexService.addBlock(blockId, {
+			filePath: file.path,
+			rawContent: blockMatch[1],
+			childrenMarkdown: '',
+			startLine: line,
+			endLine: line,
+			childrenIDs: [],
+		});
+
+		return blockId;
+	}
+
+	private async openSourceBlockLocation(block: BlockCache) {
+		await this.openReferenceLocation({
+			filePath: block.filePath,
+			line: block.startLine,
+			ch: 0,
+			kind: 'inline',
+		});
+	}
+
+	private async openSourceBlockFromBackButton(blockId: string, event: MouseEvent) {
+		const sourceBlocks = this.indexService.getActiveSourceBlocks(blockId);
+		if (sourceBlocks.length === 0) {
+			new Notice('Source block is missing.');
 			return;
 		}
 
-		await navigator.clipboard.writeText(`((${blockId}))`);
-		new Notice('Block reference copied to clipboard!');
+		if (sourceBlocks.length === 1) {
+			await this.openSourceBlockLocation(sourceBlocks[0].block);
+			return;
+		}
+
+		const menu = new Menu();
+		for (const { block } of sourceBlocks) {
+			const lineNumber = block.startLine + 1;
+			menu.addItem((item) => {
+				item
+					.setTitle(`${block.filePath}:${lineNumber}`)
+					.setIcon('file')
+					.onClick(() => {
+						void this.openSourceBlockLocation(block);
+					});
+			});
+		}
+
+		menu.showAtMouseEvent(event);
 	}
 
 	getInlineReferenceText(uuid: string): string | null {
@@ -677,15 +858,21 @@ export default class BlockReferenceEnhancer extends Plugin {
 		element.setAttribute(MANUAL_RENDER_SCOPE_ATTR, 'true');
 	}
 
-	private createInlineReferenceElement(ownerDocument: Document, summary: string, stale: boolean): HTMLSpanElement {
+	private createInlineReferenceElement(ownerDocument: Document, uuid: string, summary: string, stale: boolean): HTMLSpanElement {
 		const inlineRef = ownerDocument.createElement('span');
 		inlineRef.addClass('block-reference-inline-ref');
+		inlineRef.dataset.blockRefSourceId = uuid;
 		if (stale) {
 			inlineRef.addClass('is-stale');
 			inlineRef.setAttribute('title', 'Source block missing. Showing cached content.');
 		}
 		inlineRef.setAttribute(MANAGED_NODE_ATTR, 'true');
-		inlineRef.setText(summary);
+
+		const text = ownerDocument.createElement('span');
+		text.addClass('block-reference-inline-ref-text');
+		text.setText(summary);
+
+		inlineRef.append(text, createSourceBlockBackButtonElement(uuid, ownerDocument));
 		return inlineRef;
 	}
 
@@ -717,6 +904,7 @@ export default class BlockReferenceEnhancer extends Plugin {
 		container.removeClass('block-reference-enhancer-error');
 		container.removeClass('is-stale');
 		container.addClass('block-reference-embed', 'is-loading');
+		container.dataset.blockRefSourceId = uuid;
 		container.setAttribute(MANAGED_NODE_ATTR, 'true');
 		this.markManualRenderScope(container);
 
@@ -732,8 +920,21 @@ export default class BlockReferenceEnhancer extends Plugin {
 		container.appendChild(placeholder);
 	}
 
-	private finalizeEmbedContainer(container: HTMLElement, contentNodes: Node[]) {
+	private attachSourceBackButton(container: HTMLElement, uuid: string) {
+		const existingButton = Array.from(container.children).find((child) => {
+			return child.classList.contains('block-reference-back-button');
+		});
+		if (existingButton) {
+			existingButton.remove();
+		}
+
+		container.dataset.blockRefSourceId = uuid;
+		container.appendChild(createSourceBlockBackButtonElement(uuid, container));
+	}
+
+	private finalizeEmbedContainer(container: HTMLElement, uuid: string, contentNodes: Node[]) {
 		container.replaceChildren(...contentNodes);
+		this.attachSourceBackButton(container, uuid);
 		container.removeClass('is-loading');
 		container.style.removeProperty('--block-reference-embed-placeholder-height');
 	}
@@ -782,6 +983,7 @@ export default class BlockReferenceEnhancer extends Plugin {
 			container.removeClass('is-loading');
 			container.addClass('block-reference-enhancer-error');
 			container.setText('Cyclic embed');
+			this.attachSourceBackButton(container, uuid);
 			return;
 		}
 
@@ -791,6 +993,7 @@ export default class BlockReferenceEnhancer extends Plugin {
 			container.removeClass('is-loading');
 			container.addClass('block-reference-enhancer-error');
 			container.setText('Missing block');
+			this.attachSourceBackButton(container, uuid);
 			return;
 		}
 
@@ -819,7 +1022,7 @@ export default class BlockReferenceEnhancer extends Plugin {
 			contentNodes.push(childrenContainer);
 		}
 
-		this.finalizeEmbedContainer(container, contentNodes);
+		this.finalizeEmbedContainer(container, uuid, contentNodes);
 	}
 
 	async processRenderedReferences(
@@ -898,7 +1101,7 @@ export default class BlockReferenceEnhancer extends Plugin {
 				} else {
 					const inlineInfo = this.getInlineReferenceInfo(inlineUuid);
 					const summary = inlineInfo.text ?? '[missing block]';
-					fragment.appendChild(this.createInlineReferenceElement(node.ownerDocument, summary, inlineInfo.stale));
+					fragment.appendChild(this.createInlineReferenceElement(node.ownerDocument, inlineUuid, summary, inlineInfo.stale));
 					replacedInline = true;
 				}
 

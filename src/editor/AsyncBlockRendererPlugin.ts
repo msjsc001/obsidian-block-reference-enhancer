@@ -602,6 +602,7 @@ export function createAsyncBlockRendererPlugin(plugin: BlockReferenceEnhancer) {
                     listContentOffsetPx: target.listContentOffsetPx,
                     cardPos: target.cardPos,
                     refId: getTargetRefId(target),
+                    sourceBlockId: target.uuid,
                     signature: widgetSignature,
                     lineHeightPx: target.lineHeightPx,
                     reservedHeightPx: target.reservedHeightPx,
@@ -968,6 +969,7 @@ export function createAsyncBlockRendererPlugin(plugin: BlockReferenceEnhancer) {
                             to: target.to,
                             revealPos: target.from,
                             stale: inlineInfo.stale,
+                            sourceBlockId: target.uuid,
                         },
                     }));
                 }

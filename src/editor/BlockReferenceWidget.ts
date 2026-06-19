@@ -1,4 +1,5 @@
 import { EditorView, WidgetType } from "@codemirror/view";
+import { createSourceBlockBackButtonElement } from "src/ui/SourceBlockBackButtonElement";
 import { replaceChildrenFromHtml } from "src/utils/html";
 
 export type BlockRenderMode = "inline" | "embed";
@@ -15,6 +16,7 @@ export interface BlockWidgetInteraction {
     listContentOffsetPx?: number;
     cardPos?: number;
     refId?: string;
+    sourceBlockId?: string;
     signature?: string;
     lineHeightPx?: number;
     reservedHeightPx?: number;
@@ -51,6 +53,7 @@ export class BlockReferenceWidget extends WidgetType {
             && this.interaction?.listContentOffsetPx === other.interaction?.listContentOffsetPx
             && this.interaction?.cardPos === other.interaction?.cardPos
             && this.interaction?.refId === other.interaction?.refId
+            && this.interaction?.sourceBlockId === other.interaction?.sourceBlockId
             && this.interaction?.signature === other.interaction?.signature
             && this.interaction?.lineHeightPx === other.interaction?.lineHeightPx
             && this.interaction?.reservedHeightPx === other.interaction?.reservedHeightPx;
@@ -82,6 +85,10 @@ export class BlockReferenceWidget extends WidgetType {
 
             if (this.interaction.refId) {
                 card.dataset.blockRefId = this.interaction.refId;
+            }
+
+            if (this.interaction.sourceBlockId) {
+                card.dataset.blockRefSourceId = this.interaction.sourceBlockId;
             }
 
             if (this.interaction.availableInlineWidthPx !== undefined) {
@@ -186,10 +193,18 @@ export class BlockReferenceWidget extends WidgetType {
             container.setText("Loading...");
             container.addClass("is-loading");
         } else if (this.state === "rendered" && this.content) {
-            container.setText(this.content);
+            const text = doc.createElement("span");
+            text.className = "block-reference-inline-ref-text";
+            text.setText(this.content);
+            container.appendChild(text);
         } else {
             container.setText("Error: Invalid state");
             container.addClass("is-error");
+        }
+
+        if (this.interaction?.sourceBlockId) {
+            container.dataset.blockRefSourceId = this.interaction.sourceBlockId;
+            container.appendChild(createSourceBlockBackButtonElement(this.interaction.sourceBlockId, doc));
         }
 
         return container;

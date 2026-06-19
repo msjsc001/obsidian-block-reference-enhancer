@@ -22,10 +22,11 @@ If your notes already use UUID-style blocks, this plugin makes them readable ins
 You get:
 - Inline summaries for `((uuid))`
 - Full embeds for `{{embed ((uuid))}}`
+- A hover-only `Back` button that jumps references and embeds to their source blocks
 - Reference-count badges next to source blocks
 - A compact popover that shows where a block is referenced
 - Block autocomplete when typing `((`
-- A command to copy the current block reference
+- Commands to copy the current block reference or block embed
 - A local cache and block index for large vaults
 
 ## 👀 Best For
@@ -86,9 +87,13 @@ You get:
 
 `((uuid))` is rendered as a short summary of the target block's first line.
 
+Hover, focus, or click the rendered reference to keep a small `Back` button visible and jump to the source block.
+
 ### Block embeds
 
 `{{embed ((uuid))}}` is rendered as the target block plus its children.
+
+Hover, focus, or click the rendered embed to keep the same `Back` button visible and jump to the source block.
 
 ### Source badges
 
@@ -128,7 +133,13 @@ Open the Obsidian command palette with:
 
 Place the cursor on an outline block and run the command.
 
-If the block does not already have `id:: uuid`, the plugin adds one and copies `((uuid))` to the clipboard.
+If the block does not already have `id:: uuid`, the plugin adds one and copies `((uuid))` to the clipboard. If the block already has `id:: uuid`, the plugin reuses the existing ID instead of generating a new one.
+
+### `Copy current block embed`
+
+Place the cursor on an outline block and run the command.
+
+If the block does not already have `id:: uuid`, the plugin adds one and copies `{{embed ((uuid))}}` to the clipboard. If the block already has `id:: uuid`, the plugin reuses the existing ID instead of generating a new one.
 
 ### `Rebuild block reference index`
 

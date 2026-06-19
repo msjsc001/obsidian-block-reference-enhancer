@@ -1,4 +1,5 @@
 .block-reference-embed {
+    position: relative;
     border: 1px solid var(--background-modifier-border);
     background-color: var(--background-secondary);
     padding: 0.5em 1em;
@@ -31,6 +32,7 @@
 }
 
 .block-reference-inline-ref {
+    position: relative;
     display: inline;
     padding: 0 0.25em;
     border: 1px solid var(--background-modifier-border);
@@ -38,6 +40,60 @@
     border-radius: 4px;
     cursor: pointer;
     white-space: normal;
+}
+
+.block-reference-inline-ref-text {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+}
+
+.block-reference-back-button {
+    position: absolute;
+    top: -0.7em;
+    right: -0.2em;
+    z-index: 2;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 2.7em;
+    height: 1.7em;
+    padding: 0 0.5em;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 999px;
+    background-color: var(--background-primary);
+    color: var(--text-muted);
+    font-size: 0.68em;
+    font-weight: 600;
+    line-height: 1;
+    cursor: pointer;
+    box-sizing: border-box;
+    box-shadow: 0 8px 18px rgba(0, 0, 0, 0.16);
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(-2px);
+    transition: opacity 120ms ease, transform 120ms ease, background-color 120ms ease, color 120ms ease;
+}
+
+.block-reference-embed > .block-reference-back-button {
+    top: 0.5em;
+    right: 0.5em;
+}
+
+.block-reference-inline-ref:hover > .block-reference-back-button,
+.block-reference-inline-ref:focus-within > .block-reference-back-button,
+.block-reference-inline-ref.is-back-pinned > .block-reference-back-button,
+.block-reference-embed:hover > .block-reference-back-button,
+.block-reference-embed:focus-within > .block-reference-back-button,
+.block-reference-embed.is-back-pinned > .block-reference-back-button {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translateY(0);
+}
+
+.block-reference-back-button:hover,
+.block-reference-back-button:focus-visible {
+    background-color: var(--background-modifier-hover);
+    color: var(--text-normal);
 }
 
 .block-reference-inline-ref.is-stale {

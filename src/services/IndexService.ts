@@ -209,6 +209,16 @@ export class IndexService extends Events {
             .sort((left, right) => left.block.startLine - right.block.startLine || left.id.localeCompare(right.id));
     }
 
+    public getActiveSourceBlocks(id: string): SourceBlockRecord[] {
+        const blocks = this.activeSourceBlocksById.get(id) ?? [];
+        return blocks
+            .map((block) => ({ id: block.id, block }))
+            .sort((left, right) => {
+                return left.block.filePath.localeCompare(right.block.filePath)
+                    || left.block.startLine - right.block.startLine;
+            });
+    }
+
     public getPaginatedReferencesToBlock(id: string, page: number, pageSize: number): PaginatedBlockReferences {
         const normalizedPageSize = Math.max(1, pageSize);
         const references = this.getReferencesToBlock(id);
