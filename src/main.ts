@@ -1,4 +1,4 @@
-import { CachedMetadata, Component, Editor, ListItemCache, MarkdownPostProcessorContext, MarkdownRenderChild, MarkdownRenderer, MarkdownView, Menu, Notice, Plugin, TFile } from 'obsidian';
+import { CachedMetadata, Component, Editor, ListItemCache, MarkdownFileInfo, MarkdownPostProcessorContext, MarkdownRenderChild, MarkdownRenderer, MarkdownView, Menu, Notice, Plugin, TFile } from 'obsidian';
 import { IndexService } from './services/IndexService';
 import { BlockSuggest } from './editor/BlockSuggest';
 import { blockReferenceField } from './editor/BlockReferenceField';
@@ -103,6 +103,8 @@ export default class BlockReferenceEnhancer extends Plugin {
 	private sourceReferencePopover: SourceReferencePopover | null = null;
 	private persistedData: BlockReferenceEnhancerPersistedData = {};
 
+	private static readonly SOURCE_BLOCK_PATTERN = /^\s*-\s(.+)/;
+
 	private getBackButtonHost(target: HTMLElement): HTMLElement | null {
 		const host = target.closest('.block-reference-inline-ref, .block-reference-embed');
 		return isHtmlElement(host) ? host : null;
@@ -174,6 +176,10 @@ export default class BlockReferenceEnhancer extends Plugin {
 				this.openStaleBlockReview();
 			},
 		});
+
+		this.registerEvent(this.app.workspace.on('editor-menu', (menu, editor, info) => {
+			this.addEditorBlockCopyMenuItems(menu, editor, info);
+		}));
 
 		this.registerDomEvent(activeDocument, 'mousedown', (event) => {
 			if (event.button !== 0) {
@@ -354,8 +360,34 @@ export default class BlockReferenceEnhancer extends Plugin {
 		await this.copyCurrentBlockSyntax(editor, view, 'embed');
 	}
 
-	private async copyCurrentBlockSyntax(editor: Editor, view: MarkdownView, syntax: 'reference' | 'embed') {
-		const blockId = this.getOrCreateCurrentBlockId(editor, view);
+	private addEditorBlockCopyMenuItems(menu: Menu, editor: Editor, info: MarkdownView | MarkdownFileInfo) {
+		if (!this.isCurrentLineSourceBlock(editor)) {
+			return;
+		}
+
+		menu.addItem((item) => {
+			item
+				.setTitle('Copy block reference')
+				.setIcon('copy')
+				.setSection('block-reference-enhancer')
+				.onClick(() => {
+					void this.copyCurrentBlockSyntax(editor, info, 'reference');
+				});
+		});
+
+		menu.addItem((item) => {
+			item
+				.setTitle('Copy block embed')
+				.setIcon('copy')
+				.setSection('block-reference-enhancer')
+				.onClick(() => {
+					void this.copyCurrentBlockSyntax(editor, info, 'embed');
+				});
+		});
+	}
+
+	private async copyCurrentBlockSyntax(editor: Editor, info: MarkdownView | MarkdownFileInfo, syntax: 'reference' | 'embed') {
+		const blockId = this.getOrCreateCurrentBlockId(editor, info);
 		if (!blockId) {
 			return;
 		}
@@ -370,6 +402,12 @@ export default class BlockReferenceEnhancer extends Plugin {
 			: `((${blockId}))`;
 		await navigator.clipboard.writeText(text);
 		new Notice(syntax === 'embed' ? 'Block embed copied to clipboard!' : 'Block reference copied to clipboard!');
+	}
+
+	private isCurrentLineSourceBlock(editor: Editor): boolean {
+		const cursor = editor.getCursor();
+		const lineContent = editor.getLine(cursor.line);
+		return BlockReferenceEnhancer.SOURCE_BLOCK_PATTERN.test(lineContent);
 	}
 
 	private measureIndentColumns(value: string): number {
@@ -407,15 +445,15 @@ export default class BlockReferenceEnhancer extends Plugin {
 		return null;
 	}
 
-	private getOrCreateCurrentBlockId(editor: Editor, view: MarkdownView): string | null {
-		const file = view.file;
+	private getOrCreateCurrentBlockId(editor: Editor, info: MarkdownView | MarkdownFileInfo): string | null {
+		const file = info.file;
 		if (!file) return null;
 
 		const cursor = editor.getCursor();
 		const line = cursor.line;
 		const lineContent = editor.getLine(line);
 
-		const blockMatch = lineContent.match(/^\s*-\s(.+)/);
+		const blockMatch = lineContent.match(BlockReferenceEnhancer.SOURCE_BLOCK_PATTERN);
 		if (!blockMatch) {
 			new Notice('This line is not a valid source block.');
 			return null;

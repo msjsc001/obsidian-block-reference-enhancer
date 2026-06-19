@@ -28,7 +28,7 @@ You get:
 - Reference-count badges next to source blocks
 - A compact popover that shows where a block is referenced
 - Block autocomplete when typing `((`
-- Commands to copy the current block reference or block embed
+- Commands and editor context menu actions to copy the current block reference or block embed
 - A local cache and block index for large vaults
 
 ## 👀 Best For
@@ -139,11 +139,17 @@ Place the cursor on an outline block and run the command.
 
 If the block does not already have `id:: uuid`, the plugin adds one and copies `((uuid))` to the clipboard. If the block already has `id:: uuid`, the plugin reuses the existing ID instead of generating a new one.
 
+You can also right-click the current outline block in the editor and use:
+- `Copy block reference`
+
 ### `Copy current block embed`
 
 Place the cursor on an outline block and run the command.
 
 If the block does not already have `id:: uuid`, the plugin adds one and copies `{{embed ((uuid))}}` to the clipboard. If the block already has `id:: uuid`, the plugin reuses the existing ID instead of generating a new one.
+
+You can also right-click the current outline block in the editor and use:
+- `Copy block embed`
 
 ### `Rebuild block reference index`
 

@@ -28,7 +28,7 @@ English documentation is available in [README.md](./README.md).
 - 源块旁的引用次数数字 badge
 - 点击数字后展开的引用位置弹窗
 - 输入 `((` 后的块自动补全
-- 复制当前块引用或块嵌入的命令
+- 复制当前块引用或块嵌入的命令和右键菜单入口
 - 面向大库的本地索引和缓存
 
 ## 👀 适合谁用
@@ -139,11 +139,17 @@ Obsidian 打开命令面板快捷键：
 
 如果当前块还没有 `id:: uuid`，插件会自动补一个，然后把 `((uuid))` 复制到剪贴板。如果当前块已经有 `id:: uuid`，插件会复用已有 ID，不会重新生成。
 
+你也可以在编辑器里对当前大纲块点右键，使用：
+- `Copy block reference`
+
 ### `Copy current block embed`
 
 把光标放在一个大纲块上，执行这个命令。
 
 如果当前块还没有 `id:: uuid`，插件会自动补一个，然后把 `{{embed ((uuid))}}` 复制到剪贴板。如果当前块已经有 `id:: uuid`，插件会复用已有 ID，不会重新生成。
+
+你也可以在编辑器里对当前大纲块点右键，使用：
+- `Copy block embed`
 
 ### `Rebuild block reference index`
 

@@ -1,7 +1,7 @@
 {
 	"id": "block-reference-enhancer",
 	"name": "Block Reference Enhancer",
-	"version": "1.2.0",
+	"version": "1.2.1",
 	"minAppVersion": "0.15.0",
 	"description": "Render UUID-based block references and block embeds from Markdown.",
 	"author": "msjsc001",
