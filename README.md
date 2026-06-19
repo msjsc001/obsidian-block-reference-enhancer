@@ -4,6 +4,8 @@
 
 The plugin supports low-granularity block references and block embeds inside Obsidian, and it also makes UUID-based block references and block embeds readable, clickable, and usable in Obsidian, while staying compatible with Logseq-style block reference and block embed syntax for rendering and use.
 
+<img alt="图片" src="https://github.com/user-attachments/assets/9aca75b9-056a-4a7e-bb62-6562f93deb03" />
+
 It is a display enhancer and renderer, and it also builds a local block index and automatically tracks additions, removals, and changes for block references and block embeds:
 - `((uuid))` is shown as an inline summary.
 - `{{embed ((uuid))}}` is shown as a full block embed with children.
