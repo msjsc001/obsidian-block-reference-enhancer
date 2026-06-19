@@ -13,7 +13,7 @@ import { SourceReferencePopover } from './ui/SourceReferencePopover';
 import { isHtmlElement } from './utils/dom';
 import { serializeChildrenToHtml } from './utils/html';
 import { BlockReferenceEnhancerSettingTab } from './ui/BlockReferenceEnhancerSettingTab';
-import { DEFAULT_HIDDEN_LOGSEQ_PROPERTY_KEYS, HiddenLogseqPropertyMatcher, buildHiddenLogseqPropertyMatcher, isHiddenLogseqPropertyKey, measureIndentColumns, parseHiddenLogseqPropertyLine } from './services/LogseqPropertyMatcher';
+import { DEFAULT_HIDDEN_LOGSEQ_PROPERTY_KEYS, HiddenLogseqPropertyMatcher, buildHiddenLogseqPropertyMatcher, isHiddenLogseqPropertyKey, parseHiddenLogseqPropertyLine } from './services/LogseqPropertyMatcher';
 
 export interface BlockReferenceEnhancerSettings {
 	hideLogseqProperties: boolean;
@@ -518,6 +518,7 @@ export default class BlockReferenceEnhancer extends Plugin {
 					startLine: line,
 					endLine: line,
 					childrenIDs: [],
+					sourceUpdatedAt: file.stat.mtime,
 				});
 			}
 
@@ -538,6 +539,7 @@ export default class BlockReferenceEnhancer extends Plugin {
 			startLine: line,
 			endLine: line,
 			childrenIDs: [],
+			sourceUpdatedAt: file.stat.mtime,
 		});
 
 		return blockId;
@@ -1503,7 +1505,7 @@ export default class BlockReferenceEnhancer extends Plugin {
 				continue;
 			}
 
-			this.hideReadingModePropertyTexts(listElements[index] as HTMLLIElement, hiddenLineTexts);
+			this.hideReadingModePropertyTexts(listElements[index], hiddenLineTexts);
 		}
 	}
 
@@ -1662,13 +1664,3 @@ export default class BlockReferenceEnhancer extends Plugin {
 		});
 	}
 }
-
-
-
-
-
-
-
-
-
-

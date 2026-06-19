@@ -533,3 +533,7 @@
 .markdown-preview-view .block-reference-hidden-logseq-property {
     display: none;
 }
+
+.block-reference-hidden-property-rules-input {
+    width: 100%;
+}

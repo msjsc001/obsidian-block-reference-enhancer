@@ -17,3 +17,10 @@
 
 1. Update the plugin version consistently across release metadata.
 2. Include release notes for each GitHub release so Community review has change context.
+
+
+## Support flow
+
+1. Usage questions and reproducible bugs should go through the GitHub issue forms.
+2. Bug reports should include plugin version, Obsidian version, mode, steps, and a minimal Markdown sample.
+3. Please read SUPPORT.md before opening a new issue.

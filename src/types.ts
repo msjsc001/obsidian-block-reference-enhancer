@@ -11,6 +11,7 @@ export interface BlockCache {
     startLine: number;
     endLine?: number;
     childrenIDs: string[];
+    sourceUpdatedAt: number;
     status: BlockStatus;
     firstSeenAt: number;
     lastSeenAt: number;

@@ -213,10 +213,7 @@ export class IndexService extends Events {
         const blocks = this.activeSourceBlocksById.get(id) ?? [];
         return blocks
             .map((block) => ({ id: block.id, block }))
-            .sort((left, right) => {
-                return left.block.filePath.localeCompare(right.block.filePath)
-                    || left.block.startLine - right.block.startLine;
-            });
+            .sort((left, right) => this.compareSourceBlocksByPriority(left.block, right.block));
     }
 
     public getPaginatedReferencesToBlock(id: string, page: number, pageSize: number): PaginatedBlockReferences {
@@ -321,6 +318,7 @@ export class IndexService extends Events {
             startLine: block.startLine,
             endLine: block.endLine ?? block.startLine,
             childrenIDs: block.childrenIDs,
+            sourceUpdatedAt: block.sourceUpdatedAt,
             status: 'active',
             firstSeenAt: existing?.firstSeenAt ?? now,
             lastSeenAt: now,
@@ -648,6 +646,7 @@ export class IndexService extends Events {
                 status: 'active',
                 firstSeenAt: previousBlock?.firstSeenAt ?? now,
                 lastSeenAt: now,
+                sourceUpdatedAt: file.stat.mtime,
                 lostAt: undefined,
                 recoveredAt: previousBlock?.status === 'stale' ? now : previousBlock?.recoveredAt,
             };
@@ -697,7 +696,7 @@ export class IndexService extends Events {
     }
 
     private async parseFile(file: TFile): Promise<ParsedMarkdownFile> {
-        const content = await this.app.vault.cachedRead(file);
+        const content = await this.app.vault.read(file);
         return this.blockParser.parse(file.path, content);
     }
 
@@ -718,20 +717,26 @@ export class IndexService extends Events {
                 return false;
             }
 
+            this.fileMetaByPath = new Map(
+                Object.entries(parsed.files).map(([path, meta]) => [path, { ...meta }])
+            );
             this.blocksById = new Map(
-                Object.entries(parsed.blocks).map(([id, block]) => [id, this.normalizeLoadedBlock(id, block)])
+                Object.entries(parsed.blocks).map(([id, block]) => {
+                    const fallbackMeta = this.fileMetaByPath.get(block.filePath);
+                    return [id, this.normalizeLoadedBlock(id, block, fallbackMeta?.mtime)];
+                })
             );
             this.refsById = new Map(
                 Object.entries(parsed.refsById).map(([id, references]) => [id, references.map((reference) => ({ ...reference }))])
             );
-            this.fileMetaByPath = new Map(
-                Object.entries(parsed.files).map(([path, meta]) => [path, { ...meta }])
-            );
             this.sourceBlocksByFile = new Map(
-                Object.entries(parsed.sourceBlocksByFile).map(([path, blocks]) => [
-                    path,
-                    blocks.map((block) => this.normalizeLoadedBlock(block.id, block)),
-                ])
+                Object.entries(parsed.sourceBlocksByFile).map(([path, blocks]) => {
+                    const fallbackMeta = this.fileMetaByPath.get(path);
+                    return [
+                        path,
+                        blocks.map((block) => this.normalizeLoadedBlock(block.id, block, fallbackMeta?.mtime)),
+                    ];
+                })
             );
             this.rebuildActiveSourceBlocksById();
             this.notifyIndexUpdated();
@@ -759,6 +764,7 @@ export class IndexService extends Events {
                 startLine: block.startLine,
                 endLine: block.startLine,
                 childrenIDs: block.childrenIDs ?? [],
+                sourceUpdatedAt: now,
                 status: 'active',
                 firstSeenAt: now,
                 lastSeenAt: now,
@@ -769,11 +775,14 @@ export class IndexService extends Events {
         }
     }
 
-    private normalizeLoadedBlock(id: string, block: BlockCache): BlockCache {
+    private normalizeLoadedBlock(id: string, block: BlockCache, fallbackSourceUpdatedAt?: number): BlockCache {
         return {
             ...block,
             id,
             childrenMarkdown: block.childrenMarkdown ?? '',
+            sourceUpdatedAt: typeof block.sourceUpdatedAt === 'number'
+                ? block.sourceUpdatedAt
+                : fallbackSourceUpdatedAt ?? block.lastSeenAt ?? Date.now(),
             status: block.status ?? 'active',
             firstSeenAt: block.firstSeenAt ?? Date.now(),
             lastSeenAt: block.lastSeenAt ?? Date.now(),
@@ -824,11 +833,7 @@ export class IndexService extends Events {
         const existingBlocks = targetActiveSourceBlocksById.get(block.id) ?? [];
         const nextBlocks = existingBlocks.filter((existingBlock) => !this.isSameSourceBlock(existingBlock, block));
         nextBlocks.push({ ...block });
-        nextBlocks.sort((left, right) => {
-            return left.filePath.localeCompare(right.filePath)
-                || left.startLine - right.startLine
-                || (left.endLine ?? left.startLine) - (right.endLine ?? right.startLine);
-        });
+        nextBlocks.sort((left, right) => this.compareSourceBlocksByPriority(left, right));
         targetActiveSourceBlocksById.set(block.id, nextBlocks);
     }
 
@@ -875,7 +880,7 @@ export class IndexService extends Events {
     }
 
     private buildCanonicalActiveBlock(id: string, activeSourceBlocks: BlockCache[], previousBlock?: BlockCache): BlockCache {
-        const sourceBlock = this.pickCanonicalSourceBlock(activeSourceBlocks, previousBlock);
+        const sourceBlock = this.pickCanonicalSourceBlock(activeSourceBlocks);
         const now = Date.now();
 
         return {
@@ -889,15 +894,15 @@ export class IndexService extends Events {
         };
     }
 
-    private pickCanonicalSourceBlock(activeSourceBlocks: BlockCache[], previousBlock?: BlockCache): BlockCache {
-        if (previousBlock) {
-            const matchingBlock = activeSourceBlocks.find((block) => this.isSameSourceBlock(block, previousBlock));
-            if (matchingBlock) {
-                return matchingBlock;
-            }
-        }
+    private pickCanonicalSourceBlock(activeSourceBlocks: BlockCache[]): BlockCache {
+        return [...activeSourceBlocks].sort((left, right) => this.compareSourceBlocksByPriority(left, right))[0];
+    }
 
-        return activeSourceBlocks[0];
+    private compareSourceBlocksByPriority(left: BlockCache, right: BlockCache): number {
+        return (right.sourceUpdatedAt - left.sourceUpdatedAt)
+            || left.filePath.localeCompare(right.filePath)
+            || left.startLine - right.startLine
+            || (left.endLine ?? left.startLine) - (right.endLine ?? right.startLine);
     }
 
     private isSameSourceBlock(left: BlockCache, right: BlockCache): boolean {
@@ -1000,7 +1005,7 @@ export class IndexService extends Events {
     }
 
     private async yieldToMainThread() {
-        await new Promise<void>((resolve) => activeWindow.setTimeout(resolve, 0));
+        await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
     }
 
     private queueOperation<T>(operation: () => Promise<T>): Promise<T> {

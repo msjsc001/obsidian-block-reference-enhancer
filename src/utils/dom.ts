@@ -6,13 +6,17 @@ export function isHtmlElement(value: unknown): value is HTMLElement {
 	return isDomNode(value) && value.instanceOf(HTMLElement);
 }
 
+export function isDocumentNode(value: unknown): value is Document {
+	return isDomNode(value) && value.nodeType === 9 && 'createElement' in value;
+}
+
 export function getDocument(owner?: Node | Document | null): Document {
 	if (!owner) {
 		return activeDocument;
 	}
 
-	if ('nodeType' in owner && owner.nodeType === 9 && 'createElement' in owner) {
-		return owner as Document;
+	if (isDocumentNode(owner)) {
+		return owner;
 	}
 
 	return owner.ownerDocument ?? activeDocument;

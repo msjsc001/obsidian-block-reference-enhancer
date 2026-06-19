@@ -1,6 +1,7 @@
 import { App, PluginSettingTab, Setting } from 'obsidian';
 import type BlockReferenceEnhancer from '../main';
 import { DEFAULT_HIDDEN_LOGSEQ_PROPERTY_KEYS } from '../services/LogseqPropertyMatcher';
+import { getDocument } from '../utils/dom';
 
 const SETTINGS_SAVE_DEBOUNCE_MS = 250;
 
@@ -21,7 +22,11 @@ export class BlockReferenceEnhancerSettingTab extends PluginSettingTab {
 	display() {
 		const { containerEl } = this;
 		containerEl.empty();
-		containerEl.createEl('h2', { text: 'Block Reference Enhancer' });
+		const doc = getDocument(containerEl);
+
+		new Setting(containerEl)
+			.setName('Block Reference Enhancer')
+			.setHeading();
 
 		new Setting(containerEl)
 			.setName('Hide Logseq-style property lines')
@@ -38,7 +43,7 @@ export class BlockReferenceEnhancerSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName('Hidden property keys')
-			.setDesc(this.createRulesDescription())
+			.setDesc(this.createRulesDescription(doc))
 			.addTextArea((textArea) => {
 				textArea
 					.setValue(this.plugin.settings.hiddenLogseqPropertyKeys)
@@ -49,7 +54,7 @@ export class BlockReferenceEnhancerSettingTab extends PluginSettingTab {
 					});
 				textArea.inputEl.rows = 8;
 				textArea.inputEl.cols = 40;
-				textArea.inputEl.style.width = '100%';
+				textArea.inputEl.addClass('block-reference-hidden-property-rules-input');
 				textArea.setDisabled(!this.plugin.settings.hideLogseqProperties);
 			})
 			.addExtraButton((button) => {
@@ -76,28 +81,28 @@ export class BlockReferenceEnhancerSettingTab extends PluginSettingTab {
 		}, SETTINGS_SAVE_DEBOUNCE_MS);
 	}
 
-	private createRulesDescription(): DocumentFragment {
-		const fragment = document.createDocumentFragment();
+	private createRulesDescription(doc: Document): DocumentFragment {
+		const fragment = doc.createDocumentFragment();
 		fragment.append('Use ');
-		fragment.appendChild(this.createInlineCode('\\\\'));
+		fragment.appendChild(this.createInlineCode(doc, '\\\\'));
 		fragment.append(' as the separator between rules.');
-		fragment.appendChild(document.createElement('br'));
+		fragment.appendChild(doc.createElement('br'));
 		fragment.append('Examples in notes: ');
-		fragment.appendChild(this.createInlineCode('hl:: value'));
+		fragment.appendChild(this.createInlineCode(doc, 'hl:: value'));
 		fragment.append(' hides only the exact key ');
-		fragment.appendChild(this.createInlineCode('hl'));
+		fragment.appendChild(this.createInlineCode(doc, 'hl'));
 		fragment.append('. ');
-		fragment.appendChild(this.createInlineCode('hl-*:: value'));
+		fragment.appendChild(this.createInlineCode(doc, 'hl-*:: value'));
 		fragment.append(' hides any key that starts with ');
-		fragment.appendChild(this.createInlineCode('hl-'));
+		fragment.appendChild(this.createInlineCode(doc, 'hl-'));
 		fragment.append('. In the setting box, write only the key rules themselves, for example ');
-		fragment.appendChild(this.createInlineCode('collapsed\\\\id\\\\hl-*'));
+		fragment.appendChild(this.createInlineCode(doc, 'collapsed\\\\id\\\\hl-*'));
 		fragment.append('.');
 		return fragment;
 	}
 
-	private createInlineCode(text: string): HTMLElement {
-		const code = document.createElement('code');
+	private createInlineCode(doc: Document, text: string): HTMLElement {
+		const code = doc.createElement('code');
 		code.textContent = text;
 		return code;
 	}

@@ -1,0 +1,30 @@
+name: Feature request
+description: Suggest an improvement for Block Reference Enhancer
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem are you trying to solve?
+      description: Describe the workflow or pain point first.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Describe the behavior you want.
+    validations:
+      required: true
+  - type: textarea
+    id: examples
+    attributes:
+      label: Example notes or workflow
+      description: Paste a small Markdown sample or workflow example if it helps.
+  - type: textarea
+    id: tradeoffs
+    attributes:
+      label: Constraints or tradeoffs
+      description: Mention performance, compatibility, or UX constraints if relevant.

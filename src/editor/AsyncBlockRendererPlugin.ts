@@ -36,6 +36,7 @@ interface BlockRenderTarget {
     anchorWidthPx?: number;
     lineHeightPx?: number;
     reservedHeightPx?: number;
+    indexRevision?: number;
 }
 
 interface FenceState {
@@ -102,11 +103,11 @@ function normalizeMeasuredPx(value?: number): number {
 }
 
 function buildTargetSignature(target: BlockRenderTarget): string {
-    return `${target.from}:${target.to}:${target.mode}:${target.uuid}:${target.stale ? 1 : 0}:${target.blockWidget ? 1 : 0}:${target.preserveListMarker ? 1 : 0}:${normalizeMeasuredPx(target.availableInlineWidthPx)}:${target.renderAsListItem ? 1 : 0}:${target.indentColumns ?? 0}:${normalizeMeasuredPx(target.listMarkerOffsetPx)}:${normalizeMeasuredPx(target.listContentOffsetPx)}:${target.revealPos ?? -1}:${target.revealFrom ?? -1}:${target.revealTo ?? -1}:${target.cardPos ?? -1}:${target.refId ?? ""}:${normalizeMeasuredPx(target.lineHeightPx)}`;
+    return `${target.from}:${target.to}:${target.mode}:${target.uuid}:${target.stale ? 1 : 0}:${target.blockWidget ? 1 : 0}:${target.preserveListMarker ? 1 : 0}:${normalizeMeasuredPx(target.availableInlineWidthPx)}:${target.renderAsListItem ? 1 : 0}:${target.indentColumns ?? 0}:${normalizeMeasuredPx(target.listMarkerOffsetPx)}:${normalizeMeasuredPx(target.listContentOffsetPx)}:${target.revealPos ?? -1}:${target.revealFrom ?? -1}:${target.revealTo ?? -1}:${target.cardPos ?? -1}:${target.refId ?? ""}:${normalizeMeasuredPx(target.lineHeightPx)}:${target.indexRevision ?? -1}`;
 }
 
 function buildRenderSignature(target: BlockRenderTarget): string {
-    return `${target.from}:${target.to}:${target.mode}:${target.uuid}:${target.stale ? 1 : 0}:${target.preserveListMarker ? 1 : 0}:${normalizeMeasuredPx(target.availableInlineWidthPx)}:${target.renderAsListItem ? 1 : 0}:${target.refId ?? ""}:${normalizeMeasuredPx(target.listMarkerOffsetPx)}:${normalizeMeasuredPx(target.listContentOffsetPx)}:${normalizeMeasuredPx(target.lineHeightPx)}`;
+    return `${target.from}:${target.to}:${target.mode}:${target.uuid}:${target.stale ? 1 : 0}:${target.preserveListMarker ? 1 : 0}:${normalizeMeasuredPx(target.availableInlineWidthPx)}:${target.renderAsListItem ? 1 : 0}:${target.refId ?? ""}:${normalizeMeasuredPx(target.listMarkerOffsetPx)}:${normalizeMeasuredPx(target.listContentOffsetPx)}:${normalizeMeasuredPx(target.lineHeightPx)}:${target.indexRevision ?? -1}`;
 }
 
 function getTargetRefId(target: BlockRenderTarget): string {
@@ -887,9 +888,13 @@ export function createAsyncBlockRendererPlugin(plugin: BlockReferenceEnhancer) {
 
                 this.lastScanFingerprint = scanFingerprint;
                 this.syncRevealedEmbedTarget(this.cachedTargets);
+                const indexRevision = plugin.indexService.getIndexRevision();
                 const targets = this.cachedTargets
                     .filter((target) => this.isTargetInVisibleScanRanges(target, visibleScanRanges))
-                    .map((target) => this.measureRenderTarget(target));
+                    .map((target) => ({
+                        ...this.measureRenderTarget(target),
+                        indexRevision,
+                    }));
                 const activeTargets = new Map<number, BlockRenderTarget>();
 
                 for (const target of targets) {

@@ -62,6 +62,7 @@ export class BlockParser {
                         startLine: lineNumber,
                         endLine: lineNumber,
                         childrenIDs: [],
+                        sourceUpdatedAt: 0,
                         status: 'active',
                         firstSeenAt: 0,
                         lastSeenAt: 0,

@@ -30,6 +30,7 @@ You get:
 - Block autocomplete when typing `((`
 - Commands and editor context menu actions to copy the current block reference or block embed
 - Hidden Logseq-style outline property lines such as `id::`, `collapsed::`, and `hl-*::`
+- Saved source-block edits automatically refresh existing references and embeds
 - A local cache and block index for large vaults
 
 ## 👀 Best For
@@ -114,6 +115,8 @@ Clicking the badge opens a compact reference popover with:
 - full path
 
 If the same UUID exists as an active source block in multiple files, each active source location shows the same reference-count badge.
+
+After a source block is saved, existing references and embeds automatically refresh to the newest source content. If the same UUID exists in multiple active source blocks, the plugin uses the most recently modified active source as the canonical rendered content.
 
 ## 🧭 Useful Commands
 
@@ -204,6 +207,8 @@ Common states:
 
 Normal create, modify, delete, and rename updates after startup are incremental and usually happen silently.
 
+Source-block text changes are also handled incrementally after save. The plugin does not wait for a full rebuild, and it does not try to mirror every keystroke across the vault while you are still editing.
+
 ## 🛟 Safety: What Happens When a Source Block Goes Missing
 
 If a source block disappears but references still exist:
@@ -232,6 +237,15 @@ A block is indexed as a source block when:
 - the block has an indented property line containing `id:: uuid`
 
 This strictness is deliberate. It keeps UUID-based outline notes predictable and prevents loose Markdown from being indexed as the wrong block.
+
+## 🆘 Get Help
+
+If you run into a problem:
+- read [SUPPORT.md](./SUPPORT.md)
+- search existing GitHub issues first
+- use the `Bug report` form for reproducible problems
+- use the `Feature request` form for improvement ideas
+- include plugin version, Obsidian version, mode, reproduction steps, console errors, and a minimal Markdown sample
 
 ## 🧩 Recommended Companion Plugins
 
@@ -282,5 +296,3 @@ Planned directions include:
 - right-click source creation for block references and embeds: let native Obsidian unordered list blocks support right-click creation of source IDs with `id:: uuid`
 - search feature: provide a plugin search view that searches real block content instead of only the raw `((uuid))` syntax
 - more block-oriented workflows built on the current index and cache foundation
-
-
