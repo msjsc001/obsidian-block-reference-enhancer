@@ -5,7 +5,7 @@ import { blockReferenceField } from './editor/BlockReferenceField';
 import { createAsyncBlockRendererPlugin } from './editor/AsyncBlockRendererPlugin';
 import { createSourceReferenceBadgePlugin } from './editor/SourceReferenceBadgePlugin';
 import { createLogseqPropertyHidePlugin } from './editor/LogseqPropertyHidePlugin';
-import { BlockCache, BlockReferenceLocation, IndexBuildStats, IndexProgress, IndexStatus, LegacyPersistedBlockCacheEntry, PersistedIndexCacheV3 } from './types';
+import { BlockCache, BlockReferenceLocation, IndexBuildStats, IndexProgress, IndexStatus, LegacyPersistedBlockCacheEntry, PersistedIndexCacheV3, ReferencePreviewContext } from './types';
 import { StaleBlockReviewModal } from './ui/StaleBlockReviewModal';
 import { createSourceReferenceBadgeElement } from './ui/SourceReferenceBadgeElement';
 import { createSourceBlockBackButtonElement } from './ui/SourceBlockBackButtonElement';
@@ -13,7 +13,7 @@ import { SourceReferencePopover } from './ui/SourceReferencePopover';
 import { isHtmlElement } from './utils/dom';
 import { serializeChildrenToHtml } from './utils/html';
 import { BlockReferenceEnhancerSettingTab } from './ui/BlockReferenceEnhancerSettingTab';
-import { DEFAULT_HIDDEN_LOGSEQ_PROPERTY_KEYS, HiddenLogseqPropertyMatcher, buildHiddenLogseqPropertyMatcher, isHiddenLogseqPropertyKey, parseHiddenLogseqPropertyLine } from './services/LogseqPropertyMatcher';
+import { DEFAULT_HIDDEN_LOGSEQ_PROPERTY_KEYS, HiddenLogseqPropertyMatcher, buildHiddenLogseqPropertyMatcher, isHiddenLogseqPropertyKey, isHiddenLogseqPropertyLineText, parseHiddenLogseqPropertyLine } from './services/LogseqPropertyMatcher';
 
 export interface BlockReferenceEnhancerSettings {
 	hideLogseqProperties: boolean;
@@ -70,6 +70,13 @@ interface ReferencePreviewCacheEntry {
 	mtime: number;
 	lines: string[];
 }
+
+interface ReferencePreviewListItem {
+	content: string;
+	indentColumns: number;
+}
+
+const UNORDERED_LIST_PREVIEW_LINE_REGEX = /^(\s*)-\s+(.*)$/;
 
 function createBlockReferenceRegex() {
 	return /\{\{embed\s+\(\(([A-Za-z0-9_-]{36,})\)\)\s*\}\}|\(\(([A-Za-z0-9_-]{36,})\)\)|（（([A-Za-z0-9_-]{36,})））/g;
@@ -1301,19 +1308,162 @@ export default class BlockReferenceEnhancer extends Plugin {
 		return firstLine && firstLine.length > 0 ? firstLine : '[empty block]';
 	}
 
-	async getReferencePreview(reference: BlockReferenceLocation, maxLength = 140): Promise<string> {
-		const file = this.app.vault.getAbstractFileByPath(reference.filePath);
-		if (!(file instanceof TFile)) {
-			return '[file not found]';
+	async getReferencePreviewContexts(
+		references: readonly BlockReferenceLocation[],
+		maxLength = 140,
+	): Promise<ReferencePreviewContext[]> {
+		const contexts: ReferencePreviewContext[] = Array.from(
+			{ length: references.length },
+			() => ({ current: '[empty line]' }),
+		);
+		const referencesByFilePath = new Map<string, Array<{ index: number; reference: BlockReferenceLocation }>>();
+
+		for (const [index, reference] of references.entries()) {
+			const entries = referencesByFilePath.get(reference.filePath);
+			if (entries) {
+				entries.push({ index, reference });
+				continue;
+			}
+
+			referencesByFilePath.set(reference.filePath, [{ index, reference }]);
 		}
 
-		const lines = await this.getCachedFileLines(file);
-		const line = lines[reference.line]?.trim() ?? '';
-		if (!line) {
+		for (const [filePath, entries] of referencesByFilePath) {
+			const file = this.app.vault.getAbstractFileByPath(filePath);
+			if (!(file instanceof TFile)) {
+				for (const entry of entries) {
+					contexts[entry.index] = { current: '[file not found]' };
+				}
+				continue;
+			}
+
+			const lines = await this.getCachedFileLines(file);
+			for (const entry of entries) {
+				contexts[entry.index] = this.buildReferencePreviewContext(lines, entry.reference.line, maxLength);
+			}
+		}
+
+		return contexts;
+	}
+
+	async getReferencePreview(reference: BlockReferenceLocation, maxLength = 140): Promise<string> {
+		const [context] = await this.getReferencePreviewContexts([reference], maxLength);
+		return context?.current ?? '[empty line]';
+	}
+
+	private buildReferencePreviewContext(
+		lines: readonly string[],
+		lineNumber: number,
+		maxLength: number,
+	): ReferencePreviewContext {
+		const lineText = lines[lineNumber] ?? '';
+		const currentListItem = this.parseReferencePreviewListItem(lineText);
+		if (!currentListItem) {
+			return {
+				current: this.truncateReferencePreviewText(lineText.trim(), maxLength),
+			};
+		}
+
+		const context: ReferencePreviewContext = {
+			current: this.truncateReferencePreviewText(currentListItem.content, maxLength),
+		};
+		const parent = this.findReferencePreviewParent(lines, lineNumber, currentListItem.indentColumns, maxLength);
+		if (parent) {
+			context.parent = parent;
+		}
+
+		const child = this.findReferencePreviewChild(lines, lineNumber, currentListItem.indentColumns, maxLength);
+		if (child) {
+			context.child = child;
+		}
+
+		return context;
+	}
+
+	private findReferencePreviewParent(
+		lines: readonly string[],
+		lineNumber: number,
+		currentIndentColumns: number,
+		maxLength: number,
+	): string | undefined {
+		for (let index = lineNumber - 1; index >= 0; index--) {
+			const lineText = lines[index] ?? '';
+			if (this.isSkippableReferencePreviewContextLine(lineText)) {
+				continue;
+			}
+
+			const listItem = this.parseReferencePreviewListItem(lineText);
+			if (!listItem) {
+				continue;
+			}
+
+			if (listItem.indentColumns < currentIndentColumns) {
+				return this.truncateReferencePreviewText(listItem.content, maxLength);
+			}
+		}
+
+		return undefined;
+	}
+
+	private findReferencePreviewChild(
+		lines: readonly string[],
+		lineNumber: number,
+		currentIndentColumns: number,
+		maxLength: number,
+	): string | undefined {
+		for (let index = lineNumber + 1; index < lines.length; index++) {
+			const lineText = lines[index] ?? '';
+			if (this.isSkippableReferencePreviewContextLine(lineText)) {
+				continue;
+			}
+
+			const listItem = this.parseReferencePreviewListItem(lineText);
+			if (!listItem) {
+				continue;
+			}
+
+			if (listItem.indentColumns <= currentIndentColumns) {
+				return undefined;
+			}
+
+			return this.truncateReferencePreviewText(listItem.content, maxLength);
+		}
+
+		return undefined;
+	}
+
+	private isSkippableReferencePreviewContextLine(lineText: string): boolean {
+		return lineText.trim().length === 0 || isHiddenLogseqPropertyLineText(lineText, this.hiddenLogseqPropertyMatcher);
+	}
+
+	private parseReferencePreviewListItem(lineText: string): ReferencePreviewListItem | null {
+		const match = lineText.match(UNORDERED_LIST_PREVIEW_LINE_REGEX);
+		if (!match) {
+			return null;
+		}
+
+		return {
+			content: match[2].trim(),
+			indentColumns: this.measureReferencePreviewIndentColumns(match[1] ?? ''),
+		};
+	}
+
+	private measureReferencePreviewIndentColumns(value: string): number {
+		let columns = 0;
+		for (const char of value) {
+			columns += char === '\t' ? 4 : 1;
+		}
+
+		return columns;
+	}
+
+	private truncateReferencePreviewText(text: string, maxLength: number): string {
+		const trimmedText = text.trim();
+		if (!trimmedText) {
 			return '[empty line]';
 		}
 
-		return line.length > maxLength ? `${line.slice(0, maxLength).trimEnd()}…` : line;
+		return trimmedText.length > maxLength ? `${trimmedText.slice(0, maxLength).trimEnd()}…` : trimmedText;
 	}
 
 	async openReferenceLocation(reference: BlockReferenceLocation) {
