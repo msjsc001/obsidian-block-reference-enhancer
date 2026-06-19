@@ -1,4 +1,4 @@
-import { App, CachedMetadata, Component, Editor, ListItemCache, MarkdownPostProcessorContext, MarkdownRenderChild, MarkdownRenderer, MarkdownView, Notice, Plugin, TFile } from 'obsidian';
+import { CachedMetadata, Component, Editor, ListItemCache, MarkdownPostProcessorContext, MarkdownRenderChild, MarkdownRenderer, MarkdownView, Notice, Plugin, TFile } from 'obsidian';
 import { IndexService } from './services/IndexService';
 import { BlockSuggest } from './editor/BlockSuggest';
 import { blockReferenceField } from './editor/BlockReferenceField';
@@ -8,20 +8,17 @@ import { BlockCache, BlockReferenceLocation, IndexBuildStats, IndexProgress, Ind
 import { StaleBlockReviewModal } from './ui/StaleBlockReviewModal';
 import { createSourceReferenceBadgeElement } from './ui/SourceReferenceBadgeElement';
 import { SourceReferencePopover } from './ui/SourceReferencePopover';
+import { isHtmlElement } from './utils/dom';
 import { serializeChildrenToHtml } from './utils/html';
 
-interface BlockReferenceEnhancerSettings {
-	// 未来可能会在这里添加设置
-}
+type BlockReferenceEnhancerSettings = Record<string, never>;
 
 interface BlockReferenceEnhancerPersistedData {
 	settings?: Partial<BlockReferenceEnhancerSettings>;
 	indexCache?: PersistedIndexCacheV3 | LegacyPersistedBlockCacheEntry[] | null;
 }
 
-const DEFAULT_SETTINGS: BlockReferenceEnhancerSettings = {
-	// 默认值
-};
+const DEFAULT_SETTINGS: BlockReferenceEnhancerSettings = {};
 
 const MAX_INLINE_SUMMARY_LENGTH = 60;
 const STANDALONE_EMBED_REGEX = /^\s*\{\{embed\s+\(\(([A-Za-z0-9_-]{36,})\)\)\s*\}\}\s*$/;
@@ -79,7 +76,11 @@ class ReferencePostProcessChild extends MarkdownRenderChild {
 		super(containerEl);
 	}
 
-	async onload() {
+	onload() {
+		void this.loadReferences();
+	}
+
+	private async loadReferences() {
 		this.readingModeQueueRoot = this.plugin.attachReadingModeRenderQueue(this.containerEl);
 		await this.plugin.processRenderedReferences(this.containerEl, this.context.sourcePath, this, new Set<string>());
 		this.plugin.processReadingModeSourceBlockBadges(this.containerEl, this.context);
@@ -143,18 +144,18 @@ export default class BlockReferenceEnhancer extends Plugin {
 			},
 		});
 
-		this.registerDomEvent(document, 'mousedown', (event) => {
+		this.registerDomEvent(activeDocument, 'mousedown', (event) => {
 			if (event.button !== 0) {
 				return;
 			}
 
 			const target = event.target;
-			if (!(target instanceof HTMLElement)) {
+			if (!isHtmlElement(target)) {
 				return;
 			}
 
 			const badge = target.closest('.block-reference-source-badge');
-			if (!(badge instanceof HTMLElement)) {
+			if (!isHtmlElement(badge)) {
 				return;
 			}
 
@@ -204,7 +205,9 @@ export default class BlockReferenceEnhancer extends Plugin {
 			},
 		});
 
-		this.registerMarkdownPostProcessor(this.readingModeRenderer.bind(this));
+		this.registerMarkdownPostProcessor((element, context) => {
+			return this.readingModeRenderer(element, context);
+		});
 
 		const asyncPlugin = createAsyncBlockRendererPlugin(this);
 		const sourceReferenceBadgePlugin = createSourceReferenceBadgePlugin(this);
@@ -243,7 +246,7 @@ export default class BlockReferenceEnhancer extends Plugin {
 	}
 
 	async loadSettings() {
-		const rawData = await this.loadData();
+		const rawData: unknown = await this.loadData();
 		if (this.isPersistedData(rawData)) {
 			this.persistedData = rawData;
 		} else {
@@ -360,7 +363,7 @@ export default class BlockReferenceEnhancer extends Plugin {
 	}
 
 	async buildEmbedHtml(uuid: string, sourcePath: string, component: Component): Promise<string> {
-		const host = document.createElement('div');
+		const host = activeDocument.createElement('div');
 		await this.populateEmbedContainer(host, uuid, sourcePath, component, new Set<string>());
 		return serializeChildrenToHtml(host);
 	}
@@ -442,12 +445,12 @@ export default class BlockReferenceEnhancer extends Plugin {
 
 	private resolveReadingModePreviewRoot(element: HTMLElement): HTMLElement | null {
 		const previewRoot = element.closest('.markdown-reading-view, .markdown-preview-view');
-		if (previewRoot instanceof HTMLElement) {
+		if (isHtmlElement(previewRoot)) {
 			return previewRoot;
 		}
 
 		const renderedRoot = element.closest('.markdown-rendered');
-		return renderedRoot instanceof HTMLElement ? renderedRoot : null;
+		return isHtmlElement(renderedRoot) ? renderedRoot : null;
 	}
 
 	private findReadingModeScrollRoot(previewRoot: HTMLElement): HTMLElement {
@@ -550,8 +553,8 @@ export default class BlockReferenceEnhancer extends Plugin {
 				continue;
 			}
 
-			const hitElement = document.elementFromPoint(x, y);
-			if (!(hitElement instanceof HTMLElement)) {
+			const hitElement = previewRoot.ownerDocument.elementFromPoint(x, y);
+			if (!isHtmlElement(hitElement)) {
 				continue;
 			}
 
@@ -573,11 +576,12 @@ export default class BlockReferenceEnhancer extends Plugin {
 		excludedHost: HTMLElement
 	): ScrollAnchorSnapshot | null {
 		const scrollRect = scrollRoot.getBoundingClientRect();
-		const walker = document.createTreeWalker(previewRoot, NodeFilter.SHOW_ELEMENT);
+		const nodeFilter = previewRoot.ownerDocument.defaultView?.NodeFilter ?? NodeFilter;
+		const walker = previewRoot.ownerDocument.createTreeWalker(previewRoot, nodeFilter.SHOW_ELEMENT);
 
 		while (walker.nextNode()) {
 			const candidate = walker.currentNode;
-			if (!(candidate instanceof HTMLElement)) {
+			if (!isHtmlElement(candidate)) {
 				continue;
 			}
 
@@ -586,7 +590,7 @@ export default class BlockReferenceEnhancer extends Plugin {
 			}
 
 			const managedAncestor = candidate.closest(`[${MANAGED_NODE_ATTR}="true"]`);
-			if (managedAncestor instanceof HTMLElement) {
+			if (isHtmlElement(managedAncestor)) {
 				continue;
 			}
 
@@ -625,8 +629,8 @@ export default class BlockReferenceEnhancer extends Plugin {
 			}
 
 			if (previewRoot.contains(current)) {
-				const managedAncestor: Element | null = current.closest(`[${MANAGED_NODE_ATTR}="true"]`);
-				if (managedAncestor instanceof HTMLElement && managedAncestor !== excludedHost) {
+				const managedAncestor: HTMLElement | null = current.closest(`[${MANAGED_NODE_ATTR}="true"]`);
+				if (isHtmlElement(managedAncestor) && managedAncestor !== excludedHost) {
 					current = managedAncestor.parentElement;
 					continue;
 				}
@@ -641,7 +645,7 @@ export default class BlockReferenceEnhancer extends Plugin {
 		}
 
 		const fallback = previewRoot.firstElementChild;
-		return fallback instanceof HTMLElement ? fallback : null;
+		return isHtmlElement(fallback) ? fallback : null;
 	}
 
 	private restoreScrollAnchor(scrollRoot: HTMLElement, snapshot: ScrollAnchorSnapshot | null) {
@@ -673,8 +677,8 @@ export default class BlockReferenceEnhancer extends Plugin {
 		element.setAttribute(MANUAL_RENDER_SCOPE_ATTR, 'true');
 	}
 
-	private createInlineReferenceElement(summary: string, stale: boolean): HTMLSpanElement {
-		const inlineRef = document.createElement('span');
+	private createInlineReferenceElement(ownerDocument: Document, summary: string, stale: boolean): HTMLSpanElement {
+		const inlineRef = ownerDocument.createElement('span');
 		inlineRef.addClass('block-reference-inline-ref');
 		if (stale) {
 			inlineRef.addClass('is-stale');
@@ -723,7 +727,7 @@ export default class BlockReferenceEnhancer extends Plugin {
 			container.style.removeProperty('--block-reference-embed-placeholder-height');
 		}
 
-		const placeholder = document.createElement('div');
+		const placeholder = container.ownerDocument.createElement('div');
 		placeholder.addClass('block-reference-embed-placeholder');
 		container.appendChild(placeholder);
 	}
@@ -796,20 +800,20 @@ export default class BlockReferenceEnhancer extends Plugin {
 		const contentNodes: Node[] = [];
 		if (block.status === 'stale') {
 			container.addClass('is-stale');
-			const warning = document.createElement('div');
+			const warning = container.ownerDocument.createElement('div');
 			warning.addClass('block-reference-enhancer-warning');
 			warning.setText('Source block missing. Showing cached content.');
 			contentNodes.push(warning);
 		}
 
-		const rootContainer = document.createElement('div');
+		const rootContainer = container.ownerDocument.createElement('div');
 		rootContainer.addClass('block-reference-embed-root');
 		await this.renderMarkdownAndProcess(rootContainer, block.rawContent, sourcePath, component, nextVisitedEmbeds);
 		contentNodes.push(rootContainer);
 
 		const childMarkdown = block.childrenMarkdown?.trim();
 		if (childMarkdown) {
-			const childrenContainer = document.createElement('div');
+			const childrenContainer = container.ownerDocument.createElement('div');
 			childrenContainer.addClass('block-reference-embed-children');
 			await this.renderMarkdownAndProcess(childrenContainer, childMarkdown, sourcePath, component, nextVisitedEmbeds);
 			contentNodes.push(childrenContainer);
@@ -826,7 +830,8 @@ export default class BlockReferenceEnhancer extends Plugin {
 	) {
 		const previewRoot = element.isConnected ? this.resolveReadingModePreviewRoot(element) : null;
 		const probeRegex = createBlockReferenceRegex();
-		const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+		const nodeFilter = element.ownerDocument.defaultView?.NodeFilter ?? NodeFilter;
+		const walker = element.ownerDocument.createTreeWalker(element, nodeFilter.SHOW_TEXT);
 		const nodesToProcess: Text[] = [];
 		const deferredEmbedTasks: DeferredEmbedRenderTask[] = [];
 
@@ -850,7 +855,7 @@ export default class BlockReferenceEnhancer extends Plugin {
 			const text = node.nodeValue;
 			const standaloneEmbedMatch = text.match(STANDALONE_EMBED_REGEX);
 			if (standaloneEmbedMatch) {
-				const embedHost = document.createElement('div');
+				const embedHost = node.ownerDocument.createElement('div');
 				const parentElement = node.parentElement;
 
 				if (parentElement?.tagName === 'P') {
@@ -877,7 +882,7 @@ export default class BlockReferenceEnhancer extends Plugin {
 			let lastIndex = 0;
 			let match: RegExpExecArray | null;
 			let replacedInline = false;
-			const fragment = document.createDocumentFragment();
+			const fragment = node.ownerDocument.createDocumentFragment();
 			const replaceRegex = createBlockReferenceRegex();
 
 			while ((match = replaceRegex.exec(text))) {
@@ -886,14 +891,14 @@ export default class BlockReferenceEnhancer extends Plugin {
 				const placeholder = match[0];
 				const start = match.index;
 
-				fragment.appendChild(document.createTextNode(text.slice(lastIndex, start)));
+				fragment.appendChild(node.ownerDocument.createTextNode(text.slice(lastIndex, start)));
 
 				if (embedUuid) {
-					fragment.appendChild(document.createTextNode(placeholder));
+					fragment.appendChild(node.ownerDocument.createTextNode(placeholder));
 				} else {
 					const inlineInfo = this.getInlineReferenceInfo(inlineUuid);
 					const summary = inlineInfo.text ?? '[missing block]';
-					fragment.appendChild(this.createInlineReferenceElement(summary, inlineInfo.stale));
+					fragment.appendChild(this.createInlineReferenceElement(node.ownerDocument, summary, inlineInfo.stale));
 					replacedInline = true;
 				}
 
@@ -904,7 +909,7 @@ export default class BlockReferenceEnhancer extends Plugin {
 				continue;
 			}
 
-			fragment.appendChild(document.createTextNode(text.slice(lastIndex)));
+			fragment.appendChild(node.ownerDocument.createTextNode(text.slice(lastIndex)));
 			node.parentNode?.replaceChild(fragment, node);
 		}
 
@@ -1182,7 +1187,7 @@ export default class BlockReferenceEnhancer extends Plugin {
 	private attachReadingModeSourceBadge(listItem: HTMLLIElement, block: BlockCache, count: number) {
 		const blockId = block.id;
 		const existing = listItem.querySelector(`.block-reference-source-badge[data-block-ref-source-id="${CSS.escape(blockId)}"]`);
-		if (existing instanceof HTMLElement) {
+		if (isHtmlElement(existing)) {
 			existing.dataset.blockRefSourceCount = String(count);
 			existing.dataset.blockRefSourceFilePath = block.filePath;
 			existing.dataset.blockRefSourceStartLine = String(block.startLine);
@@ -1192,9 +1197,9 @@ export default class BlockReferenceEnhancer extends Plugin {
 			return;
 		}
 
-		const anchor = document.createElement('span');
+		const anchor = listItem.ownerDocument.createElement('span');
 		anchor.className = 'block-reference-source-badge-anchor';
-		anchor.appendChild(createSourceReferenceBadgeElement(blockId, count, block.filePath, block.startLine));
+		anchor.appendChild(createSourceReferenceBadgeElement(blockId, count, block.filePath, block.startLine, listItem));
 
 		const contentHost = this.getReadingModeBadgeContentHost(listItem);
 		if (contentHost) {

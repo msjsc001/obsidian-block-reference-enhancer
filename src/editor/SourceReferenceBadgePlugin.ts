@@ -41,7 +41,7 @@ export function createSourceReferenceBadgePlugin(plugin: BlockReferenceEnhancer)
 
             private readonly component: Component;
             private readonly indexUpdatedRef: EventRef;
-            private refreshTimer: ReturnType<typeof setTimeout> | null = null;
+            private refreshTimer: number | null = null;
             private lastFingerprint = '';
 
             constructor(private readonly view: EditorView) {
@@ -67,8 +67,8 @@ export function createSourceReferenceBadgePlugin(plugin: BlockReferenceEnhancer)
             }
 
             destroy() {
-                if (this.refreshTimer) {
-                    clearTimeout(this.refreshTimer);
+                if (this.refreshTimer !== null) {
+                    this.getViewWindow().clearTimeout(this.refreshTimer);
                 }
 
                 plugin.indexService.offref(this.indexUpdatedRef);
@@ -76,14 +76,18 @@ export function createSourceReferenceBadgePlugin(plugin: BlockReferenceEnhancer)
             }
 
             private scheduleRefresh(delayMs: number) {
-                if (this.refreshTimer) {
-                    clearTimeout(this.refreshTimer);
+                if (this.refreshTimer !== null) {
+                    this.getViewWindow().clearTimeout(this.refreshTimer);
                 }
 
-                this.refreshTimer = setTimeout(() => {
+                this.refreshTimer = this.getViewWindow().setTimeout(() => {
                     this.refreshTimer = null;
                     this.refreshDecorations();
                 }, delayMs);
+            }
+
+            private getViewWindow(): Window {
+                return this.view.scrollDOM.win;
             }
 
             private refreshDecorations() {

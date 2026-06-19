@@ -990,7 +990,7 @@ export class IndexService extends Events {
     }
 
     private async yieldToMainThread() {
-        await new Promise((resolve) => setTimeout(resolve, 0));
+        await new Promise<void>((resolve) => activeWindow.setTimeout(resolve, 0));
     }
 
     private queueOperation<T>(operation: () => Promise<T>): Promise<T> {

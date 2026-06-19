@@ -8,6 +8,7 @@ import {
 } from "./BlockReferenceField";
 import { BlockRenderMode } from "./BlockReferenceWidget";
 import BlockReferenceEnhancer from "src/main";
+import { isHtmlElement } from "src/utils/dom";
 import { replaceChildrenFromHtml } from "src/utils/html";
 
 interface BlockRenderTarget {
@@ -110,14 +111,6 @@ function buildRenderSignature(target: BlockRenderTarget): string {
 
 function getTargetRefId(target: BlockRenderTarget): string {
     return target.refId ?? `${target.mode}:${target.from}:${target.to}`;
-}
-
-function measureIndentColumns(value: string): number {
-    let columns = 0;
-    for (const char of value) {
-        columns += char === "\t" ? 4 : 1;
-    }
-    return columns;
 }
 
 function getFenceState(line: string): FenceState | null {
@@ -287,8 +280,8 @@ export function createAsyncBlockRendererPlugin(plugin: BlockReferenceEnhancer) {
             private listEmbedOverlayStates: Map<string, ListEmbedOverlayState> = new Map();
             private listEmbedOverlayEntries: Map<string, ListEmbedOverlayEntry> = new Map();
             private embedHeightCache: Map<string, number> = new Map();
-            private scanDebounceTimer: ReturnType<typeof setTimeout> | null = null;
-            private postRenderRescanTimer: ReturnType<typeof setTimeout> | null = null;
+            private scanDebounceTimer: number | null = null;
+            private postRenderRescanTimer: number | null = null;
             private lastScanFingerprint = "";
             private cachedTargets: BlockRenderTarget[] = [];
             private cachedTargetsDirty = true;
@@ -354,15 +347,23 @@ export function createAsyncBlockRendererPlugin(plugin: BlockReferenceEnhancer) {
                     this.overlayRoot = null;
                     this.view.scrollDOM.classList.remove("block-reference-overlay-host");
                 }
-                if (this.scanDebounceTimer) {
-                    clearTimeout(this.scanDebounceTimer);
+                if (this.scanDebounceTimer !== null) {
+                    this.getViewWindow().clearTimeout(this.scanDebounceTimer);
                 }
-                if (this.postRenderRescanTimer) {
-                    clearTimeout(this.postRenderRescanTimer);
+                if (this.postRenderRescanTimer !== null) {
+                    this.getViewWindow().clearTimeout(this.postRenderRescanTimer);
                 }
                 this.component.unload();
                 this.runningRenders.forEach(({ controller }) => controller.abort());
                 plugin.indexService.offref(this.indexUpdatedRef);
+            }
+
+            private getViewDocument(): Document {
+                return this.view.contentDOM.doc;
+            }
+
+            private getViewWindow(): Window {
+                return this.view.contentDOM.win;
             }
 
             private ensureOverlayRoot(): HTMLElement {
@@ -371,7 +372,7 @@ export function createAsyncBlockRendererPlugin(plugin: BlockReferenceEnhancer) {
                 }
 
                 this.view.scrollDOM.classList.add("block-reference-overlay-host");
-                const root = document.createElement("div");
+                const root = this.getViewDocument().createElement("div");
                 root.className = "block-reference-live-preview-overlay-root";
                 this.view.scrollDOM.appendChild(root);
                 this.overlayRoot = root;
@@ -379,22 +380,22 @@ export function createAsyncBlockRendererPlugin(plugin: BlockReferenceEnhancer) {
             }
 
             private scheduleScan(delayMs: number) {
-                if (this.scanDebounceTimer) {
-                    clearTimeout(this.scanDebounceTimer);
+                if (this.scanDebounceTimer !== null) {
+                    this.getViewWindow().clearTimeout(this.scanDebounceTimer);
                 }
 
-                this.scanDebounceTimer = setTimeout(() => {
+                this.scanDebounceTimer = this.getViewWindow().setTimeout(() => {
                     this.scanDebounceTimer = null;
                     this.scanAndRender();
                 }, delayMs);
             }
 
             private schedulePostRenderRescan() {
-                if (this.postRenderRescanTimer) {
-                    clearTimeout(this.postRenderRescanTimer);
+                if (this.postRenderRescanTimer !== null) {
+                    this.getViewWindow().clearTimeout(this.postRenderRescanTimer);
                 }
 
-                this.postRenderRescanTimer = setTimeout(() => {
+                this.postRenderRescanTimer = this.getViewWindow().setTimeout(() => {
                     this.postRenderRescanTimer = null;
                     this.scanAndRender();
                 }, LIVE_PREVIEW_INTERNAL_LAYOUT_RESCAN_DEBOUNCE_MS);
@@ -611,7 +612,7 @@ export function createAsyncBlockRendererPlugin(plugin: BlockReferenceEnhancer) {
                 this.view.requestMeasure({
                     read: () => {
                         const widget = this.view.scrollDOM.querySelector(`.block-reference-embed-widget[data-block-ref-id="${CSS.escape(refId)}"]`);
-                        if (!(widget instanceof HTMLElement)) {
+                        if (!isHtmlElement(widget)) {
                             return null;
                         }
 
@@ -683,16 +684,16 @@ export function createAsyncBlockRendererPlugin(plugin: BlockReferenceEnhancer) {
             }
 
             private buildListEmbedCard(target: BlockRenderTarget, html: string): HTMLElement {
-                const card = document.createElement("div");
+                const card = this.getViewDocument().createElement("div");
                 card.className = "block-reference-enhancer-widget block-reference-embed-widget markdown-rendered is-list-embed-card block-reference-live-preview-overlay-card";
                 card.dataset.blockRefFrom = String(target.from);
                 card.dataset.blockRefTo = String(target.to);
                 card.dataset.blockRefRevealPos = String(target.revealPos ?? target.from);
                 card.dataset.blockRefId = getTargetRefId(target);
-                const layout = document.createElement("div");
+                const layout = this.getViewDocument().createElement("div");
                 layout.className = "block-reference-live-preview-embed-layout is-list-card";
 
-                const embed = document.createElement("div");
+                const embed = this.getViewDocument().createElement("div");
                 embed.className = "block-reference-embed block-reference-live-preview-embed-card";
                 replaceChildrenFromHtml(embed, html);
 
@@ -731,10 +732,10 @@ export function createAsyncBlockRendererPlugin(plugin: BlockReferenceEnhancer) {
 
                 if (existing.state.html !== state.html) {
                     existing.card.empty();
-                    const layout = document.createElement("div");
+                    const layout = this.getViewDocument().createElement("div");
                     layout.className = "block-reference-live-preview-embed-layout is-list-card";
 
-                    const embed = document.createElement("div");
+                    const embed = this.getViewDocument().createElement("div");
                     embed.className = "block-reference-embed block-reference-live-preview-embed-card";
                     replaceChildrenFromHtml(embed, state.html);
 
@@ -838,12 +839,12 @@ export function createAsyncBlockRendererPlugin(plugin: BlockReferenceEnhancer) {
                 }
 
                 const target = event.target;
-                if (!(target instanceof HTMLElement)) {
+                if (!isHtmlElement(target)) {
                     return false;
                 }
 
                 const widget = target.closest(".block-reference-embed-widget");
-                if (!(widget instanceof HTMLElement)) {
+                if (!isHtmlElement(widget)) {
                     return false;
                 }
 

@@ -1,10 +1,13 @@
+import { getDocument } from '../utils/dom';
+
 export function createSourceReferenceBadgeElement(
     blockId: string,
     count: number,
     sourceFilePath?: string,
     sourceStartLine?: number,
+    owner?: Node | Document | null,
 ): HTMLButtonElement {
-    const button = document.createElement('button');
+    const button = getDocument(owner).createElement('button');
     button.type = 'button';
     button.className = 'block-reference-source-badge';
     button.dataset.blockRefSourceId = blockId;

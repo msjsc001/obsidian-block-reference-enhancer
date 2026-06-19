@@ -1,145 +1,113 @@
 # Block Reference Enhancer
 
-Simplified Chinese documentation is available in [README.zh-CN.md](./README.zh-CN.md).
+简体中文版文档见 [README.zh-CN.md](./README.zh-CN.md)。
 
-> Note
-> The plugin display name is `Block Reference Enhancer`.
-> The plugin ID and install folder name are `block-reference-enhancer`.
-> The GitHub repository keeps the `obsidian-` prefix only as the repository name.
+The plugin supports low-granularity block references and block embeds inside Obsidian, and it also makes UUID-based block references and block embeds readable, clickable, and usable in Obsidian, while staying compatible with Logseq-style block reference and block embed syntax for rendering and use.
 
-<img alt="20210606180518" src="https://github.com/user-attachments/assets/dbb64e41-f922-483f-9cf3-27916a57aa5b" />
-
-<img alt="Screenshot" src="https://github.com/user-attachments/assets/b69b1a35-7e31-4cf2-ae20-73ce725e7046" />
-
-<img alt="Screenshot" src="https://github.com/user-attachments/assets/bb31f1bf-5c23-4e5d-b3f3-014b64147b9f" />
-
-Render UUID-based block references and block embeds in Obsidian, with compatibility for common Logseq-style outline syntax.
-
-The current release is best understood as a viewer and renderer:
-- Inline block references `((uuid))` are shown as summaries in Reading Mode and Live Preview.
-- Block embeds `{{embed ((uuid))}}` render full block content and children in Reading Mode and Live Preview.
+It is a display enhancer and renderer, and it also builds a local block index and automatically tracks additions, removals, and changes for block references and block embeds:
+- `((uuid))` is shown as an inline summary.
+- `{{embed ((uuid))}}` is shown as a full block embed with children.
 - Original Markdown is not rewritten.
-- The plugin maintains its own block index instead of relying on Obsidian's search index.
+- The plugin maintains its own local block index instead of relying on Obsidian search indexing.
 
-## What It Currently Does
+> [!NOTE]
+> Plugin display name: `Block Reference Enhancer`  
+> Plugin ID and install folder: `block-reference-enhancer`  
+> The GitHub repository keeps the `obsidian-` prefix only as a repository name.
 
-- View inline block references `((uuid))`
-- View block embeds `{{embed ((uuid))}}`
-- Show reference-count badges near source blocks with `id:: uuid`
-- Open a compact reference popover from the source badge
-- Trigger block autocomplete by typing `((`
-- Copy the current block reference with a command
-- Scan the vault, build an index, and use a local cache
-- Keep index phase and summary information visible in the status bar
-- Rebuild the block index manually with a command
-- Keep rendering cached content when a source block disappears but references still exist
-- Review missing source blocks and recover them to the recovery page
+## ✨ What It Does
 
-## Current Behavior
+If your notes already use UUID-style blocks, this plugin makes them readable inside Obsidian without forcing you to rewrite your notes.
 
-- Inline block references no longer force a line break and are rendered in a way that fits Obsidian more naturally.
-- Block embeds continue to show full content and children.
-- Live Preview scrolling is now stable when block embeds are present.
-- Repeated editor-side refresh noise caused by block rendering has been reduced.
-- Long Reading Mode pages with many embeds no longer trigger the earlier auto-scroll behavior.
-- Source blocks with active references show a numeric badge in both Live Preview and Reading Mode.
-- If the same UUID exists as an active source block in multiple files, each source location shows the same reference-count badge.
-- Clicking the badge opens a reference panel that emphasizes file name, line number, preview text, and full path.
+You get:
+- Inline summaries for `((uuid))`
+- Full embeds for `{{embed ((uuid))}}`
+- Reference-count badges next to source blocks
+- A compact popover that shows where a block is referenced
+- Block autocomplete when typing `((`
+- A command to copy the current block reference
+- A local cache and block index for large vaults
 
-## Parsing Rules
+## 👀 Best For
 
-The plugin is intentionally strict about what counts as a source block.
+- Users migrating from Logseq-style UUID notes
+- Outline-heavy Markdown vaults
+- Large vaults where source blocks and references need stable rendering
+- Users who want block references and embeds to stay readable in both Live Preview and Reading Mode
 
-A block is indexed as a source block when:
-- the source line starts with an outline list marker such as `- `
-- the block has an indented property line containing `id:: uuid`
+<img alt="截图" src="https://github.com/user-attachments/assets/dbb64e41-f922-483f-9cf3-27916a57aa5b" />
 
-This is designed around UUID-based outline notes and common Logseq-style block structure. If the syntax is looser or uses a different block shape, the plugin may skip it on purpose.
+<img alt="截图" src="https://github.com/user-attachments/assets/b69b1a35-7e31-4cf2-ae20-73ce725e7046" />
 
-## Manual Install
+<img alt="截图" src="https://github.com/user-attachments/assets/bb31f1bf-5c23-4e5d-b3f3-014b64147b9f" />
 
-Install from the latest GitHub release assets rather than from the source tree.
+## 🚀 Install
+
+### Community plugin install
+
+1. Open `Settings` -> `Community plugins`.
+2. Search for `Block Reference Enhancer`.
+3. Install it.
+4. Enable it.
+
+### Manual install
 
 1. Download `main.js`, `manifest.json`, and `styles.css` from the latest GitHub release.
 2. Open your vault folder.
 3. Go to `.obsidian/plugins/`.
 4. Create a folder named `block-reference-enhancer`.
-5. Copy these files into it:
-   - `main.js`
-   - `manifest.json`
-   - `styles.css`
-6. Open Obsidian.
-7. Go to `Settings` -> `Community plugins`.
-8. Enable `Block Reference Enhancer`.
+5. Copy the three files into that folder.
+6. Enable `Block Reference Enhancer` in Obsidian.
 
-After the plugin is enabled:
-- The first full index build shows progress in the status bar.
-- When a cache already exists, startup still shows phases such as `loading cache`, `checking vault changes`, `reconciling`, and `ready`.
-- Later Markdown create/modify/delete/rename events update the index silently.
-- After startup indexing finishes, the status bar keeps a `ready` summary so you can confirm the plugin is done.
-- If many files were changed outside Obsidian, rebuilding the index manually is recommended.
-- If no local cache file exists, startup shows that a fresh full index build is running.
-- If you previously used an earlier pre-release build with a different plugin ID, reinstall into the current folder name and allow one fresh index rebuild.
+## 📝 Raw Syntax Used in Notes
 
-## Status Bar and Index States
-
-After the plugin is enabled, the status bar shows `Block index: ...` messages. This is the plugin's own block-index status, not Obsidian's search index status.
-
-Common states:
-- `Block index: loading cache...`
-  The plugin is reading the local cache.
-- `Block index: no cache found, building full index...`
-  No usable cache exists, so the plugin is running a first full index build.
-- `Block index: cache loaded, checking vault changes...`
-  The cache was loaded and the plugin is checking whether vault Markdown files still match it.
-- `Block index: checking vault changes...`
-  The plugin is checking for external changes before file-by-file reconciliation starts.
-- `Block index: reconciling X/Y files | A changed | B removed`
-  The plugin detected changed or removed files and is reconciling the cache against the real vault state.
-- `Block index: building X/Y files | N blocks | M refs`
-  A full rebuild is running, with live file/block/reference counts.
-- `Block index: ready | F files | B blocks | R refs`
-  Startup indexing is finished. The summary stays in the status bar so you can confirm the plugin is ready.
-- `Block index: rebuild failed`
-  A manual rebuild failed and should be checked in the console or retried.
-
-Additional notes:
-- Normal create/modify/delete/rename updates after startup are incremental and usually do not show persistent progress UI.
-- The first startup full build shows a completion notice once it finishes.
-- A manual `Rebuild block reference index` also shows a completion notice with file, block, and reference counts.
-- If the status bar has stabilized on `Block index: ready ...`, the plugin has usually finished its current startup indexing work.
-
-## Common Features
-
-### Inline block references
-
-Write:
+### Source block
 
 ```md
-((xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx))
+- Opportunity cost
+  id:: 68a92328-da50-46cc-aa45-73dec00ca8ce
 ```
 
-The plugin renders it as an inline summary of the target block's first line.
+### Inline block reference
+
+```md
+((68a92328-da50-46cc-aa45-73dec00ca8ce))
+```
+
+### Block embed
+
+```md
+{{embed ((68a92328-da50-46cc-aa45-73dec00ca8ce))}}
+```
+
+## 🎯 Effects After Enabling the Plugin
+
+### Inline references
+
+`((uuid))` is rendered as a short summary of the target block's first line.
 
 ### Block embeds
 
-Write:
+`{{embed ((uuid))}}` is rendered as the target block plus its children.
 
-```md
-{{embed ((xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx))}}
-```
+### Source badges
 
-The plugin renders the target block with its children.
+When a source block is referenced, the plugin shows a numeric badge beside the source block in:
+- Live Preview
+- Reading Mode
 
-### Copy current block reference
+Clicking the badge opens a compact reference popover with:
+- file name
+- line number
+- reference type
+- preview text
+- full path
 
-Place the cursor on an outline list block and run:
+If the same UUID exists as an active source block in multiple files, each active source location shows the same reference-count badge.
 
-`Copy current block reference`
+## 🧭 Useful Commands
 
-If the current block does not already have `id:: uuid`, the plugin adds one and copies `((uuid))` to the clipboard.
-
-### Block autocomplete
+### `((` autocomplete
 
 Type:
 
@@ -147,67 +115,86 @@ Type:
 ((
 ```
 
-This triggers block search and autocomplete.
+This opens block autocomplete.
 
-### Source block reference count
+It only searches blocks that have already been established as source blocks. This restriction is intentional for long-term vault performance.
 
-When a source block is referenced by `((uuid))` or `{{embed ((uuid))}}`:
-- Live Preview and Reading Mode show a count badge near the source block line.
-- Clicking the badge opens a reference popover.
-- The popover shows file name, line number, reference type, preview text, and full path.
-- Clicking a result jumps to the referenced location.
+If a needed block has not been established as a source block yet, you can first use normal Obsidian search to find the right place, then add a source block in the expected outline form.
 
-This works as a source-block backlink count entry point, not just a visual counter.
+Open the Obsidian command palette with:
+- `Ctrl/Cmd + P`
 
-If the same file references the source block multiple times, the badge counts each reference occurrence.
+### `Copy current block reference`
 
-If the same UUID exists as an active source block in multiple files, each source location shows the badge. Reusing the same UUID across different source blocks is still not recommended.
+Place the cursor on an outline block and run the command.
 
-### Rebuild block index
+If the block does not already have `id:: uuid`, the plugin adds one and copies `((uuid))` to the clipboard.
 
-Run this command from the command palette:
+### `Rebuild block reference index`
 
-`Rebuild block reference index`
+Use this when:
+- many Markdown files changed outside Obsidian
+- some references render as `[missing block]`
+- some embeds render as `Missing block`
 
-Use it when:
-- Many Markdown files were changed by Logseq, sync tools, external editors, or git while the plugin was not running
-- Some `((uuid))` references render as `[missing block]`
-- Some embeds render as `Missing block`
+### `Review missing source blocks`
 
-During rebuild:
-- The status bar shows indexing progress
-- If rebuild succeeds, the status bar returns to `Block index: ready | ...`
-- A completion notice reports file, block, and reference counts
+Use this when a source block disappeared but references still exist.
 
-### Review missing source blocks
-
-Run this command from the command palette:
-
-`Review missing source blocks`
-
-When a source block with `id:: uuid` disappears but references still exist:
-- Inline references render the last cached summary with a stale marker.
-- Block embeds render the last cached content with a source-missing warning.
-- The review dialog lets you:
-  - restore to the recovery page
-  - confirm deletion
-  - ignore for now
+The review dialog lets you:
+- restore the cached source to the recovery page
+- confirm deletion
+- ignore it for now
 
 Default recovery page:
 
 `pages/Block Recovery.md`
 
-Recovery is intentionally routed to the recovery page instead of trying to reinsert the block at its old file path and line number. That keeps the default behavior predictable in large vaults.
+## 📦 First Launch and Indexing
 
-## Troubleshooting
+The plugin builds and maintains its own block index. This is separate from Obsidian's built-in search index.
+
+On first launch, watch the status bar for `Block index: ...`.
+
+Common states:
+- `loading cache...` means the plugin is reading its local cache.
+- `no cache found, building full index...` means a first full build is running.
+- `cache loaded, checking vault changes...` means cached data was found and is being validated.
+- `reconciling X/Y files ...` means changed or removed files are being compared against the cache.
+- `ready | F files | B blocks | R refs` means startup indexing is complete.
+
+Normal create, modify, delete, and rename updates after startup are incremental and usually happen silently.
+
+## 🛟 Safety: What Happens When a Source Block Goes Missing
+
+If a source block disappears but references still exist:
+- inline references keep showing the last cached summary
+- embeds keep showing the last cached content
+- the plugin marks the content as stale
+
+Recovery is intentionally sent to the recovery page instead of trying to reinsert the block back into its old file path and old line number. That default is safer and more predictable in large vaults.
+
+## 🔎 Troubleshooting
 
 If you see `[missing block]` or `Missing block`:
-- check whether the status bar has already reached `Block index: ready`
+- wait until the status bar reaches `Block index: ready`
 - run `Rebuild block reference index`
-- check whether the source block follows the expected `- ` plus indented `id:: uuid` shape
-- use `Review missing source blocks` if the source block was removed but references still exist
+- check whether the source block follows the expected outline syntax
+- use `Review missing source blocks` if the source content was actually removed
 
-## Recommended Companion Plugins
+If you changed many files through Logseq, sync tools, git, or external editors while the plugin was not running, a manual rebuild is recommended.
+
+## 📐 Parsing Rules
+
+The plugin is intentionally strict about what counts as a source block.
+
+A block is indexed as a source block when:
+- the source line starts with an outline list marker such as `- `
+- the block has an indented property line containing `id:: uuid`
+
+This strictness is deliberate. It keeps UUID-based outline notes predictable and prevents loose Markdown from being indexed as the wrong block.
+
+## 🧩 Recommended Companion Plugins
 
 Primary recommendations:
 - `Outliner`
@@ -220,14 +207,13 @@ Secondary recommendations:
 - `Tag Wrangler`
 - `Toggle Readable line length`
 
-## Privacy and Runtime Behavior
+## ⚠️ Known Limitations
 
-- The plugin runs locally inside Obsidian.
-- It does not send your notes, UUIDs, or index data over the network.
-- It does not include telemetry, ads, or account-gated behavior.
-- The block index cache is stored through Obsidian's plugin data storage.
+- This plugin is a UUID block reference and block embed syntax enhancer, not a Logseq replacement.
+- Live Preview can still show small visual differences in very complex lists or under heavily customized themes.
+- When a source block is missing, recovery defaults to the recovery page instead of restoring the block back into its original file and line position.
 
-## Development
+## 🛠 Development
 
 ```bash
 npm install
@@ -240,20 +226,20 @@ Build artifacts:
 - `styles.css`
 
 Release notes:
-- `npm run build` produces the production `main.js`.
-- Community-plugin releases should use an exact numeric GitHub tag such as `1.1.1`, without a `v` prefix.
-- Each GitHub release should attach `main.js`, `manifest.json`, and `styles.css`.
+- GitHub releases should attach `main.js`, `manifest.json`, and `styles.css`.
+- Community-plugin releases should use an exact numeric tag such as `1.1.3`, without a `v` prefix.
+- Release notes should be written for each GitHub release.
 
-## Known Limitations
+## 🔒 Privacy
 
-- The plugin is focused on UUID block reference and block embed enhancement, not on recreating the full Logseq editing experience inside Obsidian.
-- Live Preview can still show small visual differences in complex lists or under heavily customized themes.
-- Recovery currently defaults to the recovery page and does not try to restore the source block back into its original file and line position.
+- The plugin runs locally inside Obsidian.
+- It does not send your notes, UUIDs, or index data over the network.
+- It does not include telemetry, ads, or account-gated behavior.
+- Its block index cache is stored through Obsidian's plugin data storage.
 
-## Roadmap
+## 🗺 Roadmap
 
-Future versions may support assigning UUIDs directly to individual Obsidian list blocks, so block references and block embeds can be authored natively inside Obsidian.
-
-Future versions may also add a plugin-provided search view for expanded block-reference and block-embed content, so searches can work against the real UUID-backed block content instead of only the raw `((uuid))` / `{{embed ((uuid))}}` syntax stored in notes.
-
-More block-related features may also be added over time as the plugin evolves.
+Planned directions include:
+- right-click source creation for block references and embeds: let native Obsidian unordered list blocks support right-click creation of source IDs with `id:: uuid`
+- search feature: provide a plugin search view that searches real block content instead of only the raw `((uuid))` syntax
+- more block-oriented workflows built on the current index and cache foundation

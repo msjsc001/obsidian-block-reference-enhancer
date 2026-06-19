@@ -1,4 +1,4 @@
-import { WidgetType } from "@codemirror/view";
+import { EditorView, WidgetType } from "@codemirror/view";
 import { replaceChildrenFromHtml } from "src/utils/html";
 
 export type BlockRenderMode = "inline" | "embed";
@@ -64,8 +64,8 @@ export class BlockReferenceWidget extends WidgetType {
         return event.type !== "mousedown";
     }
 
-    private createEmbedCard(isBlockWidget: boolean, isListCard: boolean): HTMLElement {
-        const card = document.createElement("div");
+    private createEmbedCard(doc: Document, isBlockWidget: boolean, isListCard: boolean): HTMLElement {
+        const card = doc.createElement("div");
         const usesMeasuredListLayout = this.interaction?.listMarkerOffsetPx !== undefined
             && this.interaction?.listContentOffsetPx !== undefined;
         const preservesListMarker = this.interaction?.preserveListMarker === true;
@@ -106,14 +106,14 @@ export class BlockReferenceWidget extends WidgetType {
         }
 
         if (this.mode === "embed" && usesMeasuredListLayout && !preservesListMarker) {
-            const layout = document.createElement("div");
+            const layout = doc.createElement("div");
             layout.className = "block-reference-live-preview-list-embed";
 
-            const marker = document.createElement("span");
+            const marker = doc.createElement("span");
             marker.className = "block-reference-live-preview-list-marker";
             marker.setAttribute("aria-hidden", "true");
 
-            const embed = document.createElement("div");
+            const embed = doc.createElement("div");
             embed.className = "block-reference-embed block-reference-live-preview-embed-card";
 
             if (this.state === "loading") {
@@ -152,26 +152,27 @@ export class BlockReferenceWidget extends WidgetType {
         return card;
     }
 
-    private createListEmbedSpacer(): HTMLElement {
-        const spacer = document.createElement("div");
+    private createListEmbedSpacer(doc: Document): HTMLElement {
+        const spacer = doc.createElement("div");
         spacer.className = "block-reference-embed-spacer";
         const reservedHeight = Math.max(this.interaction?.reservedHeightPx ?? 0, 0);
         spacer.style.height = `${reservedHeight}px`;
         return spacer;
     }
 
-    toDOM(): HTMLElement {
+    toDOM(view: EditorView): HTMLElement {
+        const doc = view.contentDOM.ownerDocument;
         const isBlockWidget = this.interaction?.blockWidget ?? this.mode === "embed";
         const isListCard = this.interaction?.cardPos !== undefined;
 
         if (this.mode === "embed" && isListCard) {
-            return this.createListEmbedSpacer();
+            return this.createListEmbedSpacer(doc);
         }
 
-        const container = document.createElement(this.mode === "embed" ? "div" : "span");
+        const container = doc.createElement(this.mode === "embed" ? "div" : "span");
 
         if (this.mode === "embed") {
-            return this.createEmbedCard(isBlockWidget, false);
+            return this.createEmbedCard(doc, isBlockWidget, false);
         } else {
             container.className = "block-reference-enhancer-widget block-reference-inline-ref";
         }

@@ -1,6 +1,7 @@
 import { setIcon } from 'obsidian';
 import type BlockReferenceEnhancer from '../main';
 import { BlockCache, BlockReferenceLocation, PaginatedBlockReferences } from '../types';
+import { getWindow, isDomNode } from '../utils/dom';
 
 const REFERENCE_PAGE_SIZE = 20;
 const MAX_REFERENCE_PREVIEW_LENGTH = 140;
@@ -10,15 +11,18 @@ export class SourceReferencePopover {
     private currentAnchorEl: HTMLElement | null = null;
     private currentBlockId: string | null = null;
     private currentBlock: BlockCache | null = null;
+    private currentDocument: Document | null = null;
+    private currentWindow: Window | null = null;
     private currentPage = 0;
     private renderToken = 0;
+    private listenersAttached = false;
     private readonly handleDocumentPointerDown = (event: MouseEvent) => {
         if (!this.containerEl) {
             return;
         }
 
         const target = event.target;
-        if (!(target instanceof Node)) {
+        if (!isDomNode(target)) {
             return;
         }
 
@@ -52,7 +56,7 @@ export class SourceReferencePopover {
         }
 
         const target = event.target;
-        if (target instanceof Node && this.containerEl.contains(target)) {
+        if (isDomNode(target) && this.containerEl.contains(target)) {
             return;
         }
 
@@ -99,6 +103,8 @@ export class SourceReferencePopover {
         this.currentAnchorEl = null;
         this.currentBlockId = null;
         this.currentBlock = null;
+        this.currentDocument = null;
+        this.currentWindow = null;
         this.currentPage = 0;
     }
 
@@ -112,9 +118,19 @@ export class SourceReferencePopover {
             return;
         }
 
+        const anchorDocument = anchorEl.ownerDocument;
+        const anchorWindow = getWindow(anchorDocument);
+        if (this.currentDocument !== anchorDocument) {
+            this.detachGlobalListeners();
+            this.containerEl?.remove();
+            this.containerEl = null;
+        }
+
         this.currentAnchorEl = anchorEl;
         this.currentBlockId = blockId;
         this.currentBlock = block;
+        this.currentDocument = anchorDocument;
+        this.currentWindow = anchorWindow;
         this.currentPage = page;
 
         this.ensureContainer();
@@ -147,51 +163,67 @@ export class SourceReferencePopover {
             return;
         }
 
-        const container = document.createElement('div');
+        const doc = this.currentDocument;
+        if (!doc) {
+            return;
+        }
+
+        const container = doc.createElement('div');
         container.className = 'block-reference-source-popover';
-        document.body.appendChild(container);
+        doc.body.appendChild(container);
         this.containerEl = container;
     }
 
     private attachGlobalListeners() {
-        document.addEventListener('mousedown', this.handleDocumentPointerDown, true);
-        document.addEventListener('keydown', this.handleDocumentKeydown);
-        document.addEventListener('scroll', this.handleDocumentScroll, true);
-        window.addEventListener('resize', this.handleWindowResize);
-    }
-
-    private detachGlobalListeners() {
-        document.removeEventListener('mousedown', this.handleDocumentPointerDown, true);
-        document.removeEventListener('keydown', this.handleDocumentKeydown);
-        document.removeEventListener('scroll', this.handleDocumentScroll, true);
-        window.removeEventListener('resize', this.handleWindowResize);
-    }
-
-    private position() {
-        if (!this.containerEl || !this.currentAnchorEl) {
+        if (this.listenersAttached) {
             return;
         }
 
+        this.currentDocument?.addEventListener('mousedown', this.handleDocumentPointerDown, true);
+        this.currentDocument?.addEventListener('keydown', this.handleDocumentKeydown);
+        this.currentDocument?.addEventListener('scroll', this.handleDocumentScroll, true);
+        this.currentWindow?.addEventListener('resize', this.handleWindowResize);
+        this.listenersAttached = true;
+    }
+
+    private detachGlobalListeners() {
+        if (!this.listenersAttached) {
+            return;
+        }
+
+        this.currentDocument?.removeEventListener('mousedown', this.handleDocumentPointerDown, true);
+        this.currentDocument?.removeEventListener('keydown', this.handleDocumentKeydown);
+        this.currentDocument?.removeEventListener('scroll', this.handleDocumentScroll, true);
+        this.currentWindow?.removeEventListener('resize', this.handleWindowResize);
+        this.listenersAttached = false;
+    }
+
+    private position() {
+        if (!this.containerEl || !this.currentAnchorEl || !this.currentWindow) {
+            return;
+        }
+
+        const currentWindow = this.currentWindow;
         const anchorRect = this.currentAnchorEl.getBoundingClientRect();
-        const popoverWidth = Math.max(280, Math.min(520, window.innerWidth - 24));
+        const popoverWidth = Math.max(280, Math.min(520, currentWindow.innerWidth - 24));
         const left = Math.min(
             Math.max(12, anchorRect.left),
-            window.innerWidth - popoverWidth - 12,
+            currentWindow.innerWidth - popoverWidth - 12,
         );
 
         this.containerEl.style.width = `${popoverWidth}px`;
         this.containerEl.style.left = `${left}px`;
 
         const preferredTop = anchorRect.bottom + 8;
-        const measuredHeight = this.containerEl.offsetHeight || Math.min(360, window.innerHeight - 24);
+        const measuredHeight = this.containerEl.offsetHeight || Math.min(360, currentWindow.innerHeight - 24);
         const topAbove = anchorRect.top - measuredHeight - 8;
         const fitsAbove = topAbove >= 12;
-        const fitsBelow = preferredTop + measuredHeight <= window.innerHeight - 12;
+        const fitsBelow = preferredTop + measuredHeight <= currentWindow.innerHeight - 12;
         const top = fitsBelow
             ? preferredTop
             : fitsAbove
                 ? topAbove
-                : Math.max(12, window.innerHeight - measuredHeight - 12);
+                : Math.max(12, currentWindow.innerHeight - measuredHeight - 12);
 
         this.containerEl.style.top = `${top}px`;
     }

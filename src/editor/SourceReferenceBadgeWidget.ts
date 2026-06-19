@@ -1,4 +1,4 @@
-import { WidgetType } from '@codemirror/view';
+import { EditorView, WidgetType } from '@codemirror/view';
 import { createSourceReferenceBadgeElement } from '../ui/SourceReferenceBadgeElement';
 
 export class SourceReferenceBadgeWidget extends WidgetType {
@@ -22,8 +22,8 @@ export class SourceReferenceBadgeWidget extends WidgetType {
         return false;
     }
 
-    toDOM(): HTMLElement {
-        const anchor = document.createElement('span');
+    toDOM(view: EditorView): HTMLElement {
+        const anchor = view.contentDOM.ownerDocument.createElement('span');
         anchor.className = 'block-reference-source-badge-anchor';
         anchor.appendChild(
             createSourceReferenceBadgeElement(
@@ -31,6 +31,7 @@ export class SourceReferenceBadgeWidget extends WidgetType {
                 this.count,
                 this.sourceFilePath,
                 this.sourceStartLine,
+                view.contentDOM,
             ),
         );
         return anchor;

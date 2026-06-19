@@ -1,5 +1,6 @@
 export function replaceChildrenFromHtml(target: HTMLElement, html: string) {
-    const parser = new DOMParser();
+    const DomParser = target.ownerDocument.defaultView?.DOMParser ?? DOMParser;
+    const parser = new DomParser();
     const parsed = parser.parseFromString(`<body>${html}</body>`, "text/html");
     const fragment = target.ownerDocument.createDocumentFragment();
 
@@ -11,10 +12,11 @@ export function replaceChildrenFromHtml(target: HTMLElement, html: string) {
 }
 
 export function serializeChildrenToHtml(container: HTMLElement): string {
-    const wrapper = document.createElement("div");
+    const wrapper = container.ownerDocument.createElement("div");
     wrapper.append(...Array.from(container.childNodes).map((node) => node.cloneNode(true)));
 
-    const serialized = new XMLSerializer().serializeToString(wrapper);
+    const XmlSerializer = container.ownerDocument.defaultView?.XMLSerializer ?? XMLSerializer;
+    const serialized = new XmlSerializer().serializeToString(wrapper);
     return serialized
         .replace(/^<div(?:\s+xmlns="[^"]+")?>/, "")
         .replace(/<\/div>$/, "");

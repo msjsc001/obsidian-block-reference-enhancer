@@ -1,215 +1,202 @@
 # Block Reference Enhancer
 
-英文主文档见 [README.md](./README.md)。
+English documentation is available in [README.md](./README.md).
 
-> 说明
-> 插件显示名是 `Block Reference Enhancer`。
-> 插件 ID 和安装文件夹名是 `block-reference-enhancer`。
-> GitHub 仓库名保留 `obsidian-` 前缀，仅用于仓库命名，不是插件 ID。
+插件支持 Obsidian 使用低粒度的块引用块嵌入，也能把基于 UUID 的块引用、块嵌入，在 Obsidian 里变得清楚、可读、可点开、可继续使用，同时兼容 Logseq 块引用、块嵌入语法风格在 Obsidian 渲染与使用。
 
-<img alt="20210606180518" src="https://github.com/user-attachments/assets/24556d2d-cca1-4913-a6b6-8e9e3418304a" />
+它是一个“显示增强器”和“渲染器”（同时它也能建立和自动检测块引用块嵌入的增删）：
+- `((uuid))` 会显示成行内摘要
+- `{{embed ((uuid))}}` 会显示成完整块嵌入和子级内容
+- 原始 Markdown 不会被改写
+- 插件会维护自己的本地块索引，不依赖 Obsidian 自带搜索索引
 
-<img alt="图片" src="https://github.com/user-attachments/assets/b69b1a35-7e31-4cf2-ae20-73ce725e7046" />
+> [!NOTE]
+> 插件显示名：`Block Reference Enhancer`  
+> 插件 ID 和安装文件夹名：`block-reference-enhancer`  
+> GitHub 仓库保留 `obsidian-` 前缀，仅用于仓库命名，不是插件 ID。
 
-<img alt="图片" src="https://github.com/user-attachments/assets/bb31f1bf-5c23-4e5d-b3f3-014b64147b9f" />
+## ✨ 这个插件能做什么
 
-在 Obsidian 中渲染基于 UUID 语法的块引用与块嵌入，并兼容 Logseq 常见的大纲块写法。
+如果你的笔记已经是 UUID 风格的块结构，这个插件可以让它们在 Obsidian 里更自然地工作，而不用你重写整套笔记格式。
 
-当前版本的定位更接近一个“查看器”与“渲染增强器”：
-- 普通块引用 `((uuid))` 会在 Reading Mode 和 Live Preview 中显示为行内摘要。
-- 块嵌入 `{{embed ((uuid))}}` 会在 Reading Mode 和 Live Preview 中显示完整块内容与子级。
-- 原始 Markdown 不会被改写。
-- 插件会维护自己的一份块索引，不依赖 Obsidian 自带搜索索引。
+你可以直接得到：
+- `((uuid))` 的行内摘要显示
+- `{{embed ((uuid))}}` 的完整块嵌入显示
+- 源块旁的引用次数数字 badge
+- 点击数字后展开的引用位置弹窗
+- 输入 `((` 后的块自动补全
+- 复制当前块引用的命令
+- 面向大库的本地索引和缓存
 
-## 当前可以做什么
+## 👀 适合谁用
 
-- 在 Reading Mode 和 Live Preview 中查看普通块引用 `((uuid))`
-- 在 Reading Mode 和 Live Preview 中查看块嵌入 `{{embed ((uuid))}}`
-- 在带 `id:: uuid` 的源块旁显示被引用次数
-- 点击源块数字 badge 打开引用位置弹窗
-- 在编辑器中输入 `((` 使用块自动补全
-- 使用命令复制当前块引用
-- 自动扫描库内 Markdown 文件，建立索引并使用本地缓存
-- 在状态栏持续显示块索引阶段和当前统计信息
-- 支持命令手动重建块索引
-- 当源块丢失但引用还存在时，使用最后缓存内容继续显示
-- 支持审查缺失源块并恢复到恢复页
+- 从 Logseq 风格 UUID 笔记迁移到 Obsidian 的用户
+- 主要写大纲型 Markdown 笔记的用户
+- 需要在大库里稳定查看块引用、块嵌入的用户
+- 希望 Live Preview 和 Reading Mode 都能正常显示的用户
 
-## 当前达到的效果
+<img alt="截图" src="https://github.com/user-attachments/assets/dbb64e41-f922-483f-9cf3-27916a57aa5b" />
 
-- 普通块引用 `((uuid))` 不再强制独占一行，而是以更适合 Obsidian 的行内方式显示。
-- 块嵌入 `{{embed ((uuid))}}` 会继续显示完整内容和子级。
-- Live Preview / 编辑模式下，滚动到块嵌入区域时页面自动缓慢下滑的问题已经修复。
-- Live Preview / 编辑模式下，块引用与块嵌入触发的高频刷新噪音已经明显降低。
-- Reading Mode 下，长页面中包含较多块嵌入时的自动滚动问题已经修复。
-- Live Preview 和 Reading Mode 中，已被引用的源块都会显示数字 badge。
-- 如果同一个 UUID 在多个文件里同时作为活动源块存在，每个源位置都会显示相同的引用计数。
-- 点击 badge 后会打开更紧凑的引用弹窗，优先显示文件名、行号、预览文本与完整路径。
+<img alt="截图" src="https://github.com/user-attachments/assets/b69b1a35-7e31-4cf2-ae20-73ce725e7046" />
 
-## 解析规则
+<img alt="截图" src="https://github.com/user-attachments/assets/bb31f1bf-5c23-4e5d-b3f3-014b64147b9f" />
 
-插件会比较严格地判断什么内容算“源块”。
+## 🚀 安装方式
 
-一个块会被索引为源块，通常需要同时满足：
-- 源行本身是无序列表块，例如以 `- ` 开头
-- 该块的缩进行里存在 `id:: uuid`
+### 社区插件市场安装
 
-这个规则是围绕 UUID 大纲笔记和常见 Logseq 风格块结构设计的。如果语法过于松散，或者块形态不是这个结构，插件可能会有意跳过，不把它当成源块处理。
+1. 打开 `设置` -> `第三方插件`
+2. 搜索 `Block Reference Enhancer`
+3. 安装
+4. 启用
 
-## 安装与使用
+### 手动安装
 
-适合普通用户的手动安装方式：
+1. 从最新 GitHub Release 下载 `main.js`、`manifest.json`、`styles.css`
+2. 打开你的 Obsidian 库目录
+3. 进入 `.obsidian/plugins/`
+4. 新建文件夹 `block-reference-enhancer`
+5. 把这三个文件放进去
+6. 回到 Obsidian 启用插件
 
-建议从 GitHub 最新 Release 下载附件安装，而不是直接从源码目录拷文件。
+## 📝 笔记里的原始语法样式
 
-1. 从最新 GitHub Release 下载 `main.js`、`manifest.json`、`styles.css`。
-2. 打开你的 Obsidian 库目录。
-3. 进入 `.obsidian/plugins/`。
-4. 新建一个文件夹，名字使用插件 ID：`block-reference-enhancer`。
-5. 将这些文件复制进去：
-   - `main.js`
-   - `manifest.json`
-   - `styles.css`
-6. 回到 Obsidian。
-7. 打开“设置” -> “第三方插件”。
-8. 启用 `Block Reference Enhancer`。
-
-插件启用后：
-- 首次完整建索引时会在状态栏显示进度。
-- 如果已经有缓存，启动时状态栏也会显示 `loading cache`、`checking vault changes`、`reconciling`、`ready` 这类阶段状态。
-- 后续 Markdown 文件增删改重命名会静默增量更新。
-- 索引完成后，状态栏会保留当前 `ready` 统计信息，方便确认插件已经完成启动期索引。
-- 如果你在 Obsidian 之外通过 Logseq、同步工具、外部编辑器或 git 大量改动了文件，建议手动重建一次索引。
-- 如果本地缓存文件不存在，插件启动时会提示正在建立新的完整索引。
-- 如果你之前使用过更早的预发布版本，而且当时的插件 ID 不同，请按当前文件夹名重新安装，并允许插件在首次启动时重新完整建索引。
-
-## 状态栏与索引状态
-
-插件启用后，状态栏会显示 `Block index: ...` 相关信息。这是插件自己的块索引状态，不是 Obsidian 自带搜索索引的状态。
-
-你通常会看到这些状态：
-- `Block index: loading cache...`
-  插件正在读取本地缓存。
-- `Block index: no cache found, building full index...`
-  本地没有可用缓存，插件正在做第一次完整建索引。
-- `Block index: cache loaded, checking vault changes...`
-  缓存已加载，插件正在检查库里的 Markdown 文件是否和缓存一致。
-- `Block index: checking vault changes...`
-  正在检查是否有外部改动，但暂时还没有进入逐文件对账。
-- `Block index: reconciling X/Y files | A changed | B removed`
-  插件已经发现有改动，正在把实际文件和缓存重新对齐。
-- `Block index: building X/Y files | N blocks | M refs`
-  正在做完整重建，状态栏会实时显示已处理文件数、块数、引用数。
-- `Block index: ready | F files | B blocks | R refs`
-  启动期索引已经完成，当前统计信息会保留在状态栏中，方便确认插件已经准备好。
-- `Block index: rebuild failed`
-  手动重建失败，需要查看控制台日志或重试。
-
-补充说明：
-- 启动后的日常增删改重命名会静默更新索引，通常不会持续弹出进度提示。
-- 第一次完整建索引完成后，插件会弹出一次完成提示。
-- 手动执行 `Rebuild block reference index` 后，插件也会弹出一次完成提示，并显示文件数、块数、引用数。
-- 如果状态栏已经稳定显示 `Block index: ready ...`，通常就说明插件已经完成当前启动阶段的索引工作。
-
-## 常用功能
-
-### 1. 普通块引用
-
-在笔记中写入：
+### 源块
 
 ```md
-((xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx))
+- 机会成本
+  id:: 68a92328-da50-46cc-aa45-73dec00ca8ce
 ```
 
-插件会尽量把它显示成目标块第一行的行内摘要。
-
-### 2. 块嵌入
-
-在笔记中写入：
+### 普通块引用
 
 ```md
-{{embed ((xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx))}}
+((68a92328-da50-46cc-aa45-73dec00ca8ce))
 ```
 
-插件会显示目标块的完整内容和子级。
+### 块嵌入
 
-### 3. 复制当前块引用
+```md
+{{embed ((68a92328-da50-46cc-aa45-73dec00ca8ce))}}
+```
 
-将光标放到一个无序列表块上，打开命令面板并执行：
+## 🎯 启用插件后的效果
 
-`Copy current block reference`
+### 普通块引用
 
-如果当前块还没有 `id:: uuid`，插件会自动补上，再把 `((uuid))` 复制到剪贴板。
+`((uuid))` 会尽量显示成目标块第一行的简短摘要。
 
-### 4. 块自动补全
+### 块嵌入
 
-在编辑器中输入：
+`{{embed ((uuid))}}` 会显示目标块本身和它的子级内容。
+
+### 源块右侧数字
+
+当某个源块已经被引用时，插件会在源块旁显示一个数字 badge。这个数字会在以下两种模式里都出现：
+- Live Preview
+- Reading Mode
+
+点击这个数字，可以打开一个紧凑的引用弹窗。弹窗会显示：
+- 文件名
+- 行号
+- 引用类型
+- 预览文本
+- 完整路径
+
+如果同一个 UUID 在多个文件里同时作为活动源块存在，每个活动源位置都会显示相同的引用计数 badge。
+
+## 🧭 常用命令
+
+### `((` 自动补全
+
+输入：
 
 ```md
 ((
 ```
 
-会触发块搜索和自动补全。
+会打开块自动补全。
 
-### 5. 源块引用次数
+它只支持已经建立“源块”的检索，这是出于长期性能考虑。
 
-当一个源块已经被其他地方通过 `((uuid))` 或 `{{embed ((uuid))}}` 引用时：
-- Live Preview 和 Reading Mode 都会在源块行末附近显示一个数字 badge。
-- 点击 badge 会弹出引用列表。
-- 弹窗会显示文件名、行号、引用类型、引用行预览和完整路径。
-- 点击某条引用会跳转到对应位置。
+如果你要引用的位置还没有建立“源块”，可以先用 Obsidian 自带搜索找到对应位置，再按预期的大纲结构建立源块。
 
-这个数字 badge 也可以理解成源块旁的反链计数入口，不只是一个静态数字。
+Obsidian 打开命令面板快捷键：
+- `Ctrl/Cmd + P`
 
-如果同一个页面里引用了多次，数字会按引用出现次数累计。
+### `Copy current block reference`
 
-如果同一个 UUID 在多个文件里同时作为活动源块存在，每个源位置都会显示这个数字 badge。但从长期维护角度看，仍然不建议把同一个 UUID 重复分配给不同源块。
+把光标放在一个大纲块上，执行这个命令。
 
-### 6. 手动重建块索引
+如果当前块还没有 `id:: uuid`，插件会自动补一个，然后把 `((uuid))` 复制到剪贴板。
 
-打开命令面板并执行：
-
-`Rebuild block reference index`
+### `Rebuild block reference index`
 
 适合这些情况：
-- 你在插件关闭期间，通过 Logseq、同步工具、外部编辑器或 git 大量改动了 Markdown 文件
-- 你在大库里看到部分 `((uuid))` 显示为 `[missing block]`
-- 你看到块嵌入显示为 `Missing block`
+- 你在 Obsidian 之外大量改动了 Markdown 文件
+- 你看到部分引用显示成 `[missing block]`
+- 你看到部分嵌入显示成 `Missing block`
 
-执行时：
-- 状态栏会显示索引进度
-- 如果重建成功，状态栏会回到 `Block index: ready | ...`
-- 完成后会弹出文件数、块数、引用数的结果提示
+### `Review missing source blocks`
 
-### 7. 审查缺失源块
+适合这些情况：
+- 源块已经丢失
+- 但库里还有地方在引用它
 
-打开命令面板并执行：
+审查窗口可以让你：
+- 恢复到恢复页
+- 确认删除
+- 暂时忽略
 
-`Review missing source blocks`
-
-当一个带 `id:: uuid` 的源块消失，但库里还有引用时：
-- 行内引用会显示最后缓存摘要，并标记这是缓存内容。
-- 块嵌入会显示最后缓存的完整内容，并提示源块缺失。
-- 你可以在审查窗口里：
-  - 恢复到恢复页
-  - 确认删除
-  - 暂时忽略
-
-默认恢复页路径：
+默认恢复页：
 
 `pages/Block Recovery.md`
 
-当前恢复策略默认是恢复到 recovery page，而不是自动尝试按原文件和原行号插回去。这样在大库里更稳定，也更可控。
+## 📦 首次启动与索引
 
-## 常见排查
+这个插件会维护自己的一套块索引。它不是 Obsidian 自带搜索索引的一部分。
 
-如果你看到了 `[missing block]` 或 `Missing block`：
+首次启动后，可以留意状态栏里的 `Block index: ...`。
+
+常见状态包括：
+- `loading cache...`：正在读取本地缓存
+- `no cache found, building full index...`：没有缓存，正在做第一次完整建索引
+- `cache loaded, checking vault changes...`：缓存已加载，正在核对库内文件变化
+- `reconciling X/Y files ...`：正在把变更文件和缓存重新对齐
+- `ready | F files | B blocks | R refs`：启动期索引已经完成
+
+启动后的正常增删改重命名，通常会静默增量更新，不会一直弹提示。
+
+## 🛟 安全措施：源块丢失时会怎样
+
+如果源块丢失了，但引用还在：
+- 行内引用会继续显示最后缓存的摘要
+- 块嵌入会继续显示最后缓存的内容
+- 插件会把它标记为 stale 状态
+
+恢复默认是写入恢复页，而不是自动尝试插回旧文件和旧行号。这样在大库里更稳，也更容易人工检查。
+
+## 🔎 常见排查
+
+如果你看到 `[missing block]` 或 `Missing block`：
 - 先看状态栏是否已经进入 `Block index: ready`
 - 执行一次 `Rebuild block reference index`
-- 检查源块是否符合预期的 `- ` 加缩进 `id:: uuid` 结构
-- 如果源块已经被删除但引用还在，用 `Review missing source blocks` 处理
+- 检查源块是否符合预期结构
+- 如果源块确实被删了，用 `Review missing source blocks` 处理
 
-## 推荐配合使用的插件
+如果你在插件关闭期间，用 Logseq、同步工具、git 或外部编辑器改动了很多文件，建议手动重建一次索引。
+
+## 📐 解析规则
+
+这个插件会比较严格地判断什么内容算“源块”。
+
+通常需要同时满足：
+- 源行本身是一个无序列表块，例如以 `- ` 开头
+- 该块的缩进行里有 `id:: uuid`
+
+这样设计是故意的。它能让 UUID 大纲笔记在大库里更可预测，避免把一些松散 Markdown 误识别成错误的源块。
+
+## 🧩 推荐搭配插件
 
 优先推荐：
 - `Outliner`
@@ -222,40 +209,39 @@
 - `Tag Wrangler`
 - `Toggle Readable line length`
 
-## 隐私与运行方式
+## ⚠️ 已知情况
 
-- 插件完全在本地 Obsidian 环境内运行。
-- 不会通过网络发送你的笔记、UUID 或索引数据。
-- 不包含遥测、广告或账号门槛。
-- 块索引缓存通过 Obsidian 的插件数据存储保存。
+- 这个插件是 UUID 块引用与块嵌入语法增强器，不是 Logseq 替代品
+- 在非常复杂的列表结构或高度定制主题下，Live Preview 仍可能有少量视觉差异
+- 源块丢失时恢复策略默认写入恢复页，不会自动按原文件和原行号插回去
 
-## 开发
+## 🛠 开发
 
 ```bash
 npm install
 npm run build
 ```
 
-构建产物是：
+构建产物：
 - `main.js`
 - `manifest.json`
 - `styles.css`
 
 发布说明：
-- `npm run build` 会产出用于发布的生产版 `main.js`。
-- 面向 Obsidian 社区插件目录发布时，GitHub tag 建议直接使用精确版本号，例如 `1.1.1`，不要加 `v` 前缀。
-- 每个 GitHub Release 都应上传 `main.js`、`manifest.json`、`styles.css`。
+- GitHub Release 需要上传 `main.js`、`manifest.json`、`styles.css`
+- 面向 Obsidian 社区插件发布时，tag 建议直接使用精确版本号，例如 `1.1.3`
+- 每次 GitHub Release 最好补上 release notes
 
-## 已知情况
+## 🔒 隐私说明
 
-- 这个插件目前更偏向 UUID 块引用与块嵌入增强器，而不是完整的 Logseq 编辑体验。
-- Live Preview 下，复杂列表、较长嵌入内容、不同主题样式之间，仍可能存在少量视觉差异。
-- 当前恢复策略固定为恢复到 recovery page，不默认尝试按原文件和原行号插回源块。
+- 插件完全在本地 Obsidian 环境运行
+- 不会通过网络发送你的笔记、UUID 或索引数据
+- 不包含遥测、广告或账号门槛
+- 块索引缓存保存在 Obsidian 的插件数据目录里
 
-## 路线图
+## 🗺 路线图
 
-后续计划会逐步支持：在 Obsidian 的某一个无序列表块上直接建立独立 UUID，用来做真正的块引用和块嵌入。
-
-后续也计划补充一个面向块引用与块嵌入展开内容的插件内搜索视图，让搜索结果可以基于 UUID 对应的真实块内容，而不只是基于笔记里的原始 `((uuid))` / `{{embed ((uuid))}}` 语法。
-
-除此之外，后面还会继续补充更多与块引用、块嵌入相关的能力，但节奏和范围会按实际使用情况逐步推进。
+后续方向包括：
+- 右键块嵌入块引用建立：让 Obsidian 原生无序列表块右键支持创建块引块嵌源 ID:UUID
+- 搜索功能：提供插件自己的块搜索视图，用真实块内容而不是原始 `((uuid))` 语法来搜索
+- 在现有索引与缓存基础上继续扩展更多块工作流能力

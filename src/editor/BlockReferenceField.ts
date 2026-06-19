@@ -1,4 +1,4 @@
-import { StateField, StateEffect, RangeSet, Transaction } from "@codemirror/state";
+import { StateField, StateEffect, Transaction } from "@codemirror/state";
 import { Decoration, DecorationSet, EditorView } from "@codemirror/view";
 import { BlockReferenceWidget, BlockRenderMode, BlockWidgetInteraction } from "./BlockReferenceWidget";
 
@@ -14,6 +14,11 @@ export const setRenderedWidgetEffect = StateEffect.define<{ from: number, to: nu
 export const removeWidgetEffect = StateEffect.define<{ from: number, to: number, refId?: string }>();
 
 // --- 状态容器 (StateField) ---
+
+function getBlockRefId(value: { spec: unknown }): string | undefined {
+	const spec = value.spec as { blockRefId?: unknown };
+	return typeof spec.blockRefId === "string" ? spec.blockRefId : undefined;
+}
 
 export const blockReferenceField = StateField.define<DecorationSet>({
     // 创建一个空的装饰集
@@ -53,7 +58,7 @@ export const blockReferenceField = StateField.define<DecorationSet>({
                     }).range(interaction.cardPos);
 
                     widgets = widgets.update({
-                        filter: (aFrom, aTo, value) => value.spec.blockRefId !== refId && (aTo <= from || aFrom >= to),
+                        filter: (aFrom, aTo, value) => getBlockRefId(value) !== refId && (aTo <= from || aFrom >= to),
                         add: [source, card],
                         sort: true,
                     });
@@ -72,7 +77,7 @@ export const blockReferenceField = StateField.define<DecorationSet>({
 
                 widgets = widgets.update({
                     // 移除与此范围重叠的旧装饰，避免重复
-                    filter: (aFrom, aTo, value) => value.spec.blockRefId !== refId && (aTo <= from || aFrom >= to),
+                    filter: (aFrom, aTo, value) => getBlockRefId(value) !== refId && (aTo <= from || aFrom >= to),
                     add: [loading],
                 });
             }
@@ -101,7 +106,7 @@ export const blockReferenceField = StateField.define<DecorationSet>({
                     }).range(interaction.cardPos);
 
                     widgets = widgets.update({
-                        filter: (aFrom, aTo, value) => value.spec.blockRefId !== refId && (aTo <= from || aFrom >= to),
+                        filter: (aFrom, aTo, value) => getBlockRefId(value) !== refId && (aTo <= from || aFrom >= to),
                         add: [source, card],
                         sort: true,
                     });
@@ -119,7 +124,7 @@ export const blockReferenceField = StateField.define<DecorationSet>({
 
                 // 关键：移除与此范围重叠的旧装饰，并添加新的 replace+widget
                 widgets = widgets.update({
-                    filter: (aFrom, aTo, value) => value.spec.blockRefId !== refId && (aTo <= from || aFrom >= to),
+                    filter: (aFrom, aTo, value) => getBlockRefId(value) !== refId && (aTo <= from || aFrom >= to),
                     add: [rendered],
                 });
             }
@@ -127,7 +132,7 @@ export const blockReferenceField = StateField.define<DecorationSet>({
                 const { from, to, refId } = effect.value;
                 widgets = widgets.update({
                     filter: (aFrom, aTo, value) => {
-                        if (refId && value.spec.blockRefId === refId) {
+                        if (refId && getBlockRefId(value) === refId) {
                             return false;
                         }
 
