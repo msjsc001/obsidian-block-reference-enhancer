@@ -4,6 +4,8 @@ English documentation is available in [README.md](./README.md).
 
 插件支持 Obsidian 使用低粒度的块引用块嵌入，也能把基于 UUID 的块引用、块嵌入，在 Obsidian 里变得清楚、可读、可点开、可继续使用，同时兼容 Logseq 块引用、块嵌入语法风格在 Obsidian 渲染与使用。
 
+<img alt="图片" src="https://github.com/user-attachments/assets/9aca75b9-056a-4a7e-bb62-6562f93deb03" />
+
 它是一个“显示增强器”和“渲染器”（同时它也能建立和自动检测块引用块嵌入的增删）：
 - `((uuid))` 会显示成行内摘要
 - `{{embed ((uuid))}}` 会显示成完整块嵌入和子级内容
