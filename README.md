@@ -40,6 +40,8 @@ You get:
 
 <img alt="截图" src="https://github.com/user-attachments/assets/dbb64e41-f922-483f-9cf3-27916a57aa5b" />
 
+<img alt="20210606180518-2" src="https://github.com/user-attachments/assets/cedf92bf-a82b-4a35-bca5-9dd689fb3384" />
+
 <img alt="截图" src="https://github.com/user-attachments/assets/b69b1a35-7e31-4cf2-ae20-73ce725e7046" />
 
 <img alt="图片" src="https://github.com/user-attachments/assets/9b50225a-00ce-4078-850b-89b8397be095" />
