@@ -40,9 +40,7 @@ You get:
 - Large vaults where source blocks and references need stable rendering
 - Users who want block references and embeds to stay readable in both Live Preview and Reading Mode
 
-<img alt="截图" src="https://github.com/user-attachments/assets/dbb64e41-f922-483f-9cf3-27916a57aa5b" />
-
-<img alt="20210606180518-2" src="https://github.com/user-attachments/assets/cedf92bf-a82b-4a35-bca5-9dd689fb3384" />
+<img alt="20210606180518-2" src="https://github.com/user-attachments/assets/bd3336d4-ddfe-42e8-9e24-fbe6cc5238a1" />
 
 <img alt="截图" src="https://github.com/user-attachments/assets/b69b1a35-7e31-4cf2-ae20-73ce725e7046" />
 

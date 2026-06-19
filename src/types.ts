@@ -26,6 +26,12 @@ export interface BlockReferenceLocation {
     kind: 'inline' | 'embed';
 }
 
+export interface ReferencePreviewContext {
+    parent?: string;
+    current: string;
+    child?: string;
+}
+
 export interface FileIndexMeta {
     path: string;
     mtime: number;

@@ -1,6 +1,6 @@
 import { setIcon } from 'obsidian';
 import type BlockReferenceEnhancer from '../main';
-import { BlockCache, BlockReferenceLocation, PaginatedBlockReferences } from '../types';
+import { BlockCache, BlockReferenceLocation, PaginatedBlockReferences, ReferencePreviewContext } from '../types';
 import { getWindow, isDomNode } from '../utils/dom';
 
 const REFERENCE_PAGE_SIZE = 20;
@@ -145,10 +145,11 @@ export class SourceReferencePopover {
         }
 
         const token = ++this.renderToken;
-        const items = await Promise.all(pageData.references.map(async (reference) => ({
+        const previewContexts = await this.plugin.getReferencePreviewContexts(pageData.references, MAX_REFERENCE_PREVIEW_LENGTH);
+        const items = pageData.references.map((reference, index) => ({
             reference,
-            preview: await this.plugin.getReferencePreview(reference, MAX_REFERENCE_PREVIEW_LENGTH),
-        })));
+            previewContext: previewContexts[index] ?? { current: '[empty line]' },
+        }));
 
         if (token !== this.renderToken || !this.containerEl || this.currentBlockId !== blockId) {
             return;
@@ -256,7 +257,7 @@ export class SourceReferencePopover {
         blockId: string,
         block: BlockCache,
         pageData: PaginatedBlockReferences,
-        items: Array<{ reference: BlockReferenceLocation; preview: string }>
+        items: Array<{ reference: BlockReferenceLocation; previewContext: ReferencePreviewContext }>
     ) {
         if (!this.containerEl) {
             return;
@@ -313,10 +314,7 @@ export class SourceReferencePopover {
                 text: `L${item.reference.line + 1}`,
             });
 
-            row.createDiv({
-                cls: 'block-reference-source-popover-item-preview',
-                text: item.preview,
-            });
+            this.renderPreviewContext(row, item.previewContext);
 
             if (fileName !== item.reference.filePath) {
                 const fullPathEl = row.createDiv({
@@ -373,6 +371,44 @@ export class SourceReferencePopover {
         }
 
         this.position();
+    }
+
+    private renderPreviewContext(row: HTMLDivElement, previewContext: ReferencePreviewContext) {
+        const previewEl = row.createDiv({ cls: 'block-reference-source-popover-item-preview' });
+        const rootList = previewEl.createEl('ul', { cls: 'block-reference-source-popover-item-preview-list' });
+
+        if (previewContext.parent) {
+            const parentItem = this.appendPreviewContextItem(rootList, previewContext.parent, 'parent');
+            const currentList = parentItem.createEl('ul', { cls: 'block-reference-source-popover-item-preview-list' });
+            const currentItem = this.appendPreviewContextItem(currentList, previewContext.current, 'current');
+            if (previewContext.child) {
+                const childList = currentItem.createEl('ul', { cls: 'block-reference-source-popover-item-preview-list' });
+                this.appendPreviewContextItem(childList, previewContext.child, 'child');
+            }
+            return;
+        }
+
+        const currentItem = this.appendPreviewContextItem(rootList, previewContext.current, 'current');
+        if (previewContext.child) {
+            const childList = currentItem.createEl('ul', { cls: 'block-reference-source-popover-item-preview-list' });
+            this.appendPreviewContextItem(childList, previewContext.child, 'child');
+        }
+    }
+
+    private appendPreviewContextItem(
+        listEl: HTMLElement,
+        text: string,
+        role: 'parent' | 'current' | 'child',
+    ): HTMLLIElement {
+        const itemEl = listEl.createEl('li', {
+            cls: 'block-reference-source-popover-item-preview-entry is-' + role,
+        });
+        const textEl = itemEl.createSpan({
+            cls: 'block-reference-source-popover-item-preview-text',
+            text,
+        });
+        textEl.title = text;
+        return itemEl;
     }
 
     private getReferenceKindLabel(kind: BlockReferenceLocation['kind']): string {
