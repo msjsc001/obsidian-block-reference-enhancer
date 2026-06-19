@@ -1,6 +1,6 @@
 # Block Reference Enhancer
 
-简体中文版文档见 [README.zh-CN.md](./README.zh-CN.md)。
+简体中文版文档见 [README.zh-CN.md](https://github.com/msjsc001/obsidian-block-reference-enhancer/blob/main/README.zh-CN.md)。
 
 The plugin supports low-granularity block references and block embeds inside Obsidian, and it also makes UUID-based block references and block embeds readable, clickable, and usable in Obsidian, while staying compatible with Logseq-style block reference and block embed syntax for rendering and use.
 
