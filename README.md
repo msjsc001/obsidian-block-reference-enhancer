@@ -29,6 +29,7 @@ You get:
 - A compact popover that shows where a block is referenced
 - Block autocomplete when typing `((`
 - Commands and editor context menu actions to copy the current block reference or block embed
+- Hidden Logseq-style outline property lines such as `id::`, `collapsed::`, and `hl-*::`
 - A local cache and block index for large vaults
 
 ## 👀 Best For
@@ -171,6 +172,23 @@ Default recovery page:
 
 `pages/Block Recovery.md`
 
+## ⚙️ Property Hiding Settings
+
+The plugin now includes a setting to hide Logseq-style property lines, and it is enabled by default.
+
+You can change it in:
+- `Settings -> Community plugins -> Block Reference Enhancer`
+
+Rule notes:
+- Use `\\` as the separator between rules in the setting box
+- In notes, `hl:: value` means the exact key `hl`
+- In notes, `hl-*:: value` means any key that starts with `hl-`
+- In the setting box, write only the key rules themselves, for example `collapsed\\id\\hl-*`
+
+The default rule set already includes common properties such as id, collapsed, hl-*, and ls-type.
+
+This feature only hides matching property-line display under unordered-list blocks and does not modify the original Markdown.
+
 ## 📦 First Launch and Indexing
 
 The plugin builds and maintains its own block index. This is separate from Obsidian's built-in search index.
@@ -264,3 +282,5 @@ Planned directions include:
 - right-click source creation for block references and embeds: let native Obsidian unordered list blocks support right-click creation of source IDs with `id:: uuid`
 - search feature: provide a plugin search view that searches real block content instead of only the raw `((uuid))` syntax
 - more block-oriented workflows built on the current index and cache foundation
+
+

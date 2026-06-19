@@ -527,3 +527,9 @@
   margin-top: 0.5em;
   margin-bottom: 0.5em;
 }
+
+.markdown-source-view.mod-cm6 .cm-line.block-reference-hidden-logseq-property,
+.markdown-reading-view .block-reference-hidden-logseq-property,
+.markdown-preview-view .block-reference-hidden-logseq-property {
+    display: none;
+}

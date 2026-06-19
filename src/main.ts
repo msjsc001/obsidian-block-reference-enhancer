@@ -1,9 +1,10 @@
-import { CachedMetadata, Component, Editor, ListItemCache, MarkdownFileInfo, MarkdownPostProcessorContext, MarkdownRenderChild, MarkdownRenderer, MarkdownView, Menu, Notice, Plugin, TFile } from 'obsidian';
+import { CachedMetadata, Component, Editor, EventRef, Events, ListItemCache, MarkdownFileInfo, MarkdownPostProcessorContext, MarkdownRenderChild, MarkdownRenderer, MarkdownView, Menu, Notice, Plugin, TFile } from 'obsidian';
 import { IndexService } from './services/IndexService';
 import { BlockSuggest } from './editor/BlockSuggest';
 import { blockReferenceField } from './editor/BlockReferenceField';
 import { createAsyncBlockRendererPlugin } from './editor/AsyncBlockRendererPlugin';
 import { createSourceReferenceBadgePlugin } from './editor/SourceReferenceBadgePlugin';
+import { createLogseqPropertyHidePlugin } from './editor/LogseqPropertyHidePlugin';
 import { BlockCache, BlockReferenceLocation, IndexBuildStats, IndexProgress, IndexStatus, LegacyPersistedBlockCacheEntry, PersistedIndexCacheV3 } from './types';
 import { StaleBlockReviewModal } from './ui/StaleBlockReviewModal';
 import { createSourceReferenceBadgeElement } from './ui/SourceReferenceBadgeElement';
@@ -11,15 +12,23 @@ import { createSourceBlockBackButtonElement } from './ui/SourceBlockBackButtonEl
 import { SourceReferencePopover } from './ui/SourceReferencePopover';
 import { isHtmlElement } from './utils/dom';
 import { serializeChildrenToHtml } from './utils/html';
+import { BlockReferenceEnhancerSettingTab } from './ui/BlockReferenceEnhancerSettingTab';
+import { DEFAULT_HIDDEN_LOGSEQ_PROPERTY_KEYS, HiddenLogseqPropertyMatcher, buildHiddenLogseqPropertyMatcher, isHiddenLogseqPropertyKey, measureIndentColumns, parseHiddenLogseqPropertyLine } from './services/LogseqPropertyMatcher';
 
-type BlockReferenceEnhancerSettings = Record<string, never>;
+export interface BlockReferenceEnhancerSettings {
+	hideLogseqProperties: boolean;
+	hiddenLogseqPropertyKeys: string;
+}
 
 interface BlockReferenceEnhancerPersistedData {
 	settings?: Partial<BlockReferenceEnhancerSettings>;
 	indexCache?: PersistedIndexCacheV3 | LegacyPersistedBlockCacheEntry[] | null;
 }
 
-const DEFAULT_SETTINGS: BlockReferenceEnhancerSettings = {};
+const DEFAULT_SETTINGS: BlockReferenceEnhancerSettings = {
+	hideLogseqProperties: true,
+	hiddenLogseqPropertyKeys: DEFAULT_HIDDEN_LOGSEQ_PROPERTY_KEYS,
+};
 
 const MAX_INLINE_SUMMARY_LENGTH = 60;
 const STANDALONE_EMBED_REGEX = /^\s*\{\{embed\s+\(\(([A-Za-z0-9_-]{36,})\)\)\s*\}\}\s*$/;
@@ -83,6 +92,7 @@ class ReferencePostProcessChild extends MarkdownRenderChild {
 
 	private async loadReferences() {
 		this.readingModeQueueRoot = this.plugin.attachReadingModeRenderQueue(this.containerEl);
+		await this.plugin.processReadingModeHiddenLogseqProperties(this.containerEl, this.context);
 		await this.plugin.processRenderedReferences(this.containerEl, this.context.sourcePath, this, new Set<string>());
 		this.plugin.processReadingModeSourceBlockBadges(this.containerEl, this.context);
 	}
@@ -102,6 +112,9 @@ export default class BlockReferenceEnhancer extends Plugin {
 	private startupFullRebuildPending = false;
 	private sourceReferencePopover: SourceReferencePopover | null = null;
 	private persistedData: BlockReferenceEnhancerPersistedData = {};
+	private hiddenLogseqPropertyMatcher: HiddenLogseqPropertyMatcher = buildHiddenLogseqPropertyMatcher(DEFAULT_HIDDEN_LOGSEQ_PROPERTY_KEYS);
+	private logseqPropertySettingsRevision = 0;
+	private readonly logseqPropertyEvents = new Events();
 
 	private static readonly SOURCE_BLOCK_PATTERN = /^\s*-\s(.+)/;
 
@@ -129,6 +142,7 @@ export default class BlockReferenceEnhancer extends Plugin {
 
 	async onload() {
 		await this.loadSettings();
+		this.addSettingTab(new BlockReferenceEnhancerSettingTab(this.app, this));
 
 		this.indexService = new IndexService(this.app, {
 			load: async () => this.persistedData.indexCache ?? null,
@@ -292,7 +306,8 @@ export default class BlockReferenceEnhancer extends Plugin {
 
 		const asyncPlugin = createAsyncBlockRendererPlugin(this);
 		const sourceReferenceBadgePlugin = createSourceReferenceBadgePlugin(this);
-		this.registerEditorExtension([blockReferenceField, asyncPlugin, sourceReferenceBadgePlugin]);
+		const logseqPropertyHidePlugin = createLogseqPropertyHidePlugin(this);
+		this.registerEditorExtension([blockReferenceField, asyncPlugin, sourceReferenceBadgePlugin, logseqPropertyHidePlugin]);
 
 		this.registerEditorSuggest(new BlockSuggest(this.app, this.indexService));
 
@@ -338,18 +353,47 @@ export default class BlockReferenceEnhancer extends Plugin {
 		}
 
 		this.settings = Object.assign({}, DEFAULT_SETTINGS, this.persistedData.settings ?? {});
+		this.syncHiddenLogseqPropertyMatcher();
 	}
 
 	async saveSettings() {
+		this.syncHiddenLogseqPropertyMatcher();
 		this.persistedData = {
 			...this.persistedData,
 			settings: this.settings,
 		};
 		await this.saveData(this.persistedData);
+		this.logseqPropertySettingsRevision += 1;
+		this.logseqPropertyEvents.trigger('changed');
+		this.refreshOpenMarkdownViews();
 	}
 
 	private isPersistedData(value: unknown): value is BlockReferenceEnhancerPersistedData {
 		return !!value && typeof value === 'object' && ('settings' in value || 'indexCache' in value);
+	}
+
+	private syncHiddenLogseqPropertyMatcher() {
+		this.hiddenLogseqPropertyMatcher = buildHiddenLogseqPropertyMatcher(this.settings.hiddenLogseqPropertyKeys);
+	}
+
+	onLogseqPropertySettingsChanged(callback: () => void): EventRef {
+		return this.logseqPropertyEvents.on('changed', callback);
+	}
+
+	offLogseqPropertySettingsChanged(ref: EventRef) {
+		this.logseqPropertyEvents.offref(ref);
+	}
+
+	shouldHideLogseqProperties(): boolean {
+		return this.settings.hideLogseqProperties;
+	}
+
+	getHiddenLogseqPropertyMatcher(): HiddenLogseqPropertyMatcher {
+		return this.hiddenLogseqPropertyMatcher;
+	}
+
+	getLogseqPropertySettingsRevision(): number {
+		return this.logseqPropertySettingsRevision;
 	}
 
 	async handleCopyBlockReference(editor: Editor, view: MarkdownView) {
@@ -1261,19 +1305,7 @@ export default class BlockReferenceEnhancer extends Plugin {
 			return '[file not found]';
 		}
 
-		const cached = this.referencePreviewCache.get(reference.filePath);
-		let lines: string[];
-		if (cached && cached.mtime === file.stat.mtime) {
-			lines = cached.lines;
-		} else {
-			const content = await this.app.vault.cachedRead(file);
-			lines = content.split(/\r?\n/);
-			this.referencePreviewCache.set(reference.filePath, {
-				mtime: file.stat.mtime,
-				lines,
-			});
-		}
-
+		const lines = await this.getCachedFileLines(file);
 		const line = lines[reference.line]?.trim() ?? '';
 		if (!line) {
 			return '[empty line]';
@@ -1416,6 +1448,154 @@ export default class BlockReferenceEnhancer extends Plugin {
 		this.statusBarEl.setText(message);
 	}
 
+	private async getCachedFileLines(file: TFile): Promise<string[]> {
+		const cached = this.referencePreviewCache.get(file.path);
+		if (cached && cached.mtime === file.stat.mtime) {
+			return cached.lines;
+		}
+
+		const content = await this.app.vault.cachedRead(file);
+		const lines = content.split(/\r?\n/);
+		this.referencePreviewCache.set(file.path, {
+			mtime: file.stat.mtime,
+			lines,
+		});
+		return lines;
+	}
+
+	async processReadingModeHiddenLogseqProperties(element: HTMLElement, context: MarkdownPostProcessorContext) {
+		if (!this.shouldHideLogseqProperties()) {
+			return;
+		}
+
+		const file = this.app.vault.getAbstractFileByPath(context.sourcePath);
+		if (!(file instanceof TFile)) {
+			return;
+		}
+
+		const sectionInfo = context.getSectionInfo(element);
+		if (!sectionInfo) {
+			return;
+		}
+
+		const cache = this.app.metadataCache.getFileCache(file);
+		const listItems = this.getListItemsForSection(cache, sectionInfo.lineStart, sectionInfo.lineEnd);
+		if (listItems.length === 0) {
+			return;
+		}
+
+		const listElements = Array.from(element.querySelectorAll('li')).filter((listItem) => {
+			return listItem.closest(`[${MANAGED_NODE_ATTR}="true"]`) === null;
+		});
+		if (listElements.length === 0) {
+			return;
+		}
+
+		const lines = await this.getCachedFileLines(file);
+		const listItemCount = Math.min(listItems.length, listElements.length);
+		for (let index = 0; index < listItemCount; index++) {
+			const hiddenLineTexts = this.getHiddenLogseqPropertyTextsForListItem(
+				lines,
+				listItems[index].position.start.line,
+				sectionInfo.lineEnd,
+			);
+			if (hiddenLineTexts.length === 0) {
+				continue;
+			}
+
+			this.hideReadingModePropertyTexts(listElements[index] as HTMLLIElement, hiddenLineTexts);
+		}
+	}
+
+	private getHiddenLogseqPropertyTextsForListItem(lines: string[], startLine: number, lineEnd: number): string[] {
+		const sourceLine = lines[startLine] ?? '';
+		const baseIndent = this.measureIndentColumns(sourceLine.match(/^(\s*)/)?.[1] ?? '');
+		const hiddenLineTexts: string[] = [];
+
+		for (let lineNumber = startLine + 1; lineNumber < lines.length && lineNumber <= lineEnd; lineNumber++) {
+			const line = lines[lineNumber];
+			if (line.trim().length === 0) {
+				continue;
+			}
+
+			const parsedLine = parseHiddenLogseqPropertyLine(line);
+			if (!parsedLine) {
+				const indentation = this.measureIndentColumns(line.match(/^(\s*)/)?.[1] ?? '');
+				if (indentation <= baseIndent) {
+					break;
+				}
+				continue;
+			}
+
+			if (parsedLine.indentColumns <= baseIndent) {
+				break;
+			}
+
+			if (!isHiddenLogseqPropertyKey(parsedLine.key, this.hiddenLogseqPropertyMatcher)) {
+				continue;
+			}
+
+			hiddenLineTexts.push(line.trim());
+		}
+
+		return hiddenLineTexts;
+	}
+
+	private hideReadingModePropertyTexts(listItem: HTMLLIElement, hiddenLineTexts: string[]) {
+		const hiddenTextSet = new Set(hiddenLineTexts.map((line) => line.trim()).filter((line) => line.length > 0));
+		for (const childNode of Array.from(listItem.childNodes)) {
+			this.hideReadingModePropertyTextInNode(childNode, hiddenTextSet);
+		}
+	}
+
+	private hideReadingModePropertyTextInNode(node: Node, hiddenLineTexts: ReadonlySet<string>) {
+		if (node.nodeType === Node.TEXT_NODE) {
+			node.nodeValue = this.stripHiddenPropertyTextFromString(node.nodeValue ?? '', hiddenLineTexts);
+			return;
+		}
+
+		if (!isHtmlElement(node)) {
+			return;
+		}
+
+		if (node.matches('ul, ol, .block-reference-source-badge-anchor')) {
+			return;
+		}
+
+		if (node.getAttribute(MANAGED_NODE_ATTR) === 'true') {
+			return;
+		}
+
+		const elementText = node.textContent?.trim() ?? '';
+		if (elementText && hiddenLineTexts.has(elementText)) {
+			node.addClass('block-reference-hidden-logseq-property');
+			return;
+		}
+
+		for (const childNode of Array.from(node.childNodes)) {
+			this.hideReadingModePropertyTextInNode(childNode, hiddenLineTexts);
+		}
+
+		const remainingText = node.textContent?.replace(/\u200b/g, '').trim() ?? '';
+		if (!remainingText && !node.querySelector('ul, ol, .block-reference-source-badge-anchor')) {
+			node.addClass('block-reference-hidden-logseq-property');
+		}
+	}
+
+	private stripHiddenPropertyTextFromString(text: string, hiddenLineTexts: ReadonlySet<string>): string {
+		let nextText = text;
+		for (const hiddenLineText of hiddenLineTexts) {
+			const escapedText = hiddenLineText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+			const linePattern = new RegExp(`(^|\\n)\\s*${escapedText}\\s*(?=\\n|$)`, 'g');
+			nextText = nextText.replace(linePattern, (_match, prefix) => prefix as string);
+			if (nextText.trim() === hiddenLineText) {
+				nextText = '';
+			}
+		}
+
+		return nextText.replace(/\n{3,}/g, '\n\n');
+	}
+
 	private getListItemsForSection(cache: CachedMetadata | null, lineStart: number, lineEnd: number): ListItemCache[] {
 		return (cache?.listItems ?? [])
 			.filter((item) => item.position.start.line >= lineStart && item.position.start.line <= lineEnd)
@@ -1482,3 +1662,13 @@ export default class BlockReferenceEnhancer extends Plugin {
 		});
 	}
 }
+
+
+
+
+
+
+
+
+
+
