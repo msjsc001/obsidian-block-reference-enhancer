@@ -1,10 +1,9 @@
 import { Component, EventRef, editorInfoField } from 'obsidian';
-import { RangeSetBuilder } from '@codemirror/state';
+import { EditorState, RangeSetBuilder } from '@codemirror/state';
 import { Decoration, DecorationSet, EditorView, ViewPlugin, ViewUpdate } from '@codemirror/view';
 import type BlockReferenceEnhancer from '../main';
 import { SourceReferenceBadgeWidget } from './SourceReferenceBadgeWidget';
 
-const SOURCE_BADGE_DOC_SCAN_DEBOUNCE_MS = 220;
 const SOURCE_BADGE_VIEWPORT_SCAN_DEBOUNCE_MS = 100;
 const SOURCE_BADGE_VISIBLE_MARGIN_LINES = 10;
 
@@ -34,6 +33,10 @@ function isLineVisible(lineNumber: number, visibleRanges: VisibleLineRange[]): b
     return false;
 }
 
+function getEditorFilePath(state: EditorState): string | null {
+    return state.field(editorInfoField).file?.path ?? null;
+}
+
 export function createSourceReferenceBadgePlugin(plugin: BlockReferenceEnhancer) {
     return ViewPlugin.fromClass(
         class {
@@ -41,13 +44,32 @@ export function createSourceReferenceBadgePlugin(plugin: BlockReferenceEnhancer)
 
             private readonly component: Component;
             private readonly indexUpdatedRef: EventRef;
+            private readonly indexFileUpdatedRef: EventRef;
             private refreshTimer: number | null = null;
             private lastFingerprint = '';
+            private dirtyFilePath: string | null = null;
 
             constructor(private readonly view: EditorView) {
                 this.component = new Component();
                 plugin.addChild(this.component);
                 this.indexUpdatedRef = plugin.indexService.on('index-updated', () => {
+                    if (this.isCurrentFileDirty()) {
+                        return;
+                    }
+
+                    this.lastFingerprint = '';
+                    this.scheduleRefresh(SOURCE_BADGE_VIEWPORT_SCAN_DEBOUNCE_MS);
+                });
+                this.indexFileUpdatedRef = plugin.indexService.on('index-file-updated', (payload: { filePath?: string } | undefined) => {
+                    if (!payload?.filePath || payload.filePath !== this.dirtyFilePath) {
+                        return;
+                    }
+
+                    this.dirtyFilePath = null;
+                    if (payload.filePath !== getEditorFilePath(this.view.state)) {
+                        return;
+                    }
+
                     this.lastFingerprint = '';
                     this.scheduleRefresh(SOURCE_BADGE_VIEWPORT_SCAN_DEBOUNCE_MS);
                 });
@@ -57,7 +79,27 @@ export function createSourceReferenceBadgePlugin(plugin: BlockReferenceEnhancer)
 
             update(update: ViewUpdate) {
                 if (update.docChanged) {
-                    this.scheduleRefresh(SOURCE_BADGE_DOC_SCAN_DEBOUNCE_MS);
+                    const previousFilePath = getEditorFilePath(update.startState);
+                    const nextFilePath = getEditorFilePath(update.state);
+
+                    this.lastFingerprint = '';
+                    this.cancelRefresh();
+
+                    if (previousFilePath !== nextFilePath) {
+                        this.dirtyFilePath = null;
+                        if (this.decorations !== Decoration.none) {
+                            this.decorations = Decoration.none;
+                        }
+                        this.scheduleRefresh(SOURCE_BADGE_VIEWPORT_SCAN_DEBOUNCE_MS);
+                        return;
+                    }
+
+                    this.decorations = this.decorations.map(update.changes);
+                    this.dirtyFilePath = nextFilePath;
+                    return;
+                }
+
+                if (this.isCurrentFileDirty()) {
                     return;
                 }
 
@@ -67,19 +109,21 @@ export function createSourceReferenceBadgePlugin(plugin: BlockReferenceEnhancer)
             }
 
             destroy() {
-                if (this.refreshTimer !== null) {
-                    this.getViewWindow().clearTimeout(this.refreshTimer);
-                }
-
+                this.cancelRefresh();
                 plugin.indexService.offref(this.indexUpdatedRef);
+                plugin.indexService.offref(this.indexFileUpdatedRef);
                 this.component.unload();
             }
 
-            private scheduleRefresh(delayMs: number) {
+            private cancelRefresh() {
                 if (this.refreshTimer !== null) {
                     this.getViewWindow().clearTimeout(this.refreshTimer);
+                    this.refreshTimer = null;
                 }
+            }
 
+            private scheduleRefresh(delayMs: number) {
+                this.cancelRefresh();
                 this.refreshTimer = this.getViewWindow().setTimeout(() => {
                     this.refreshTimer = null;
                     this.refreshDecorations();
@@ -90,9 +134,19 @@ export function createSourceReferenceBadgePlugin(plugin: BlockReferenceEnhancer)
                 return this.view.scrollDOM.win;
             }
 
+            private isCurrentFileDirty(): boolean {
+                const currentFilePath = getEditorFilePath(this.view.state);
+                return !!currentFilePath && currentFilePath === this.dirtyFilePath;
+            }
+
             private refreshDecorations() {
+                if (this.isCurrentFileDirty()) {
+                    return;
+                }
+
                 const file = this.view.state.field(editorInfoField).file;
                 if (!file) {
+                    this.dirtyFilePath = null;
                     if (this.lastFingerprint !== 'no-file' || this.decorations !== Decoration.none) {
                         this.lastFingerprint = 'no-file';
                         this.decorations = Decoration.none;
