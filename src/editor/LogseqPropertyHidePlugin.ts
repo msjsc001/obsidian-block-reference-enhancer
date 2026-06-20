@@ -57,6 +57,7 @@ export function createLogseqPropertyHidePlugin(plugin: BlockReferenceEnhancer) {
 
 			update(update: ViewUpdate) {
 				if (update.docChanged) {
+                    this.decorations = this.decorations.map(update.changes);
 					this.analyzedDocFingerprint = '';
 					this.scheduleRefresh(PROPERTY_HIDE_DOC_SCAN_DEBOUNCE_MS);
 					return;

@@ -40,6 +40,7 @@ const EMBED_PLACEHOLDER_MIN_LINES = 2;
 const EMBED_PLACEHOLDER_MAX_LINES = 10;
 const READING_MODE_SCROLL_IDLE_MS = 180;
 const SCROLL_ANCHOR_SAMPLE_OFFSETS_PX = [16, 32, 48, 72];
+const EMBED_CHILD_LIST_LINE_REGEX = /^([ \t]*)-\s+/;
 
 interface DeferredEmbedRenderTask {
 	host: HTMLElement;
@@ -80,6 +81,96 @@ const UNORDERED_LIST_PREVIEW_LINE_REGEX = /^(\s*)-\s+(.*)$/;
 
 function createBlockReferenceRegex() {
 	return /\{\{embed\s+\(\(([A-Za-z0-9_-]{36,})\)\)\s*\}\}|\(\(([A-Za-z0-9_-]{36,})\)\)|（（([A-Za-z0-9_-]{36,})））/g;
+}
+
+function normalizeEmbedChildrenMarkdown(childrenMarkdown: string): string {
+	const lines = childrenMarkdown.split(/\r?\n/);
+
+	while (lines.length > 0 && lines[0].trim().length === 0) {
+		lines.shift();
+	}
+
+	while (lines.length > 0 && lines[lines.length - 1].trim().length === 0) {
+		lines.pop();
+	}
+
+	if (lines.length === 0) {
+		return '';
+	}
+
+	const childIndentColumns = lines
+		.map((line) => {
+			const match = line.match(EMBED_CHILD_LIST_LINE_REGEX);
+			if (!match) {
+				return null;
+			}
+
+			return measureIndentColumns(match[1]);
+		})
+		.filter((columns): columns is number => columns !== null);
+
+	if (childIndentColumns.length === 0) {
+		return lines.join('\n');
+	}
+
+	const sharedIndentColumns = Math.min(...childIndentColumns);
+	if (sharedIndentColumns <= 0) {
+		return lines.join('\n');
+	}
+
+	return lines
+		.map((line) => removeLeadingIndentColumns(line, sharedIndentColumns))
+		.join('\n');
+}
+
+function measureIndentColumns(value: string): number {
+	let columns = 0;
+
+	for (const char of value) {
+		if (char === ' ') {
+			columns += 1;
+			continue;
+		}
+
+		if (char === '\t') {
+			const tabWidth = 4 - (columns % 4);
+			columns += tabWidth === 0 ? 4 : tabWidth;
+			continue;
+		}
+
+		break;
+	}
+
+	return columns;
+}
+
+function removeLeadingIndentColumns(line: string, columnsToRemove: number): string {
+	if (line.trim().length === 0 || columnsToRemove <= 0) {
+		return line.trim().length === 0 ? '' : line;
+	}
+
+	let consumedColumns = 0;
+	let index = 0;
+
+	while (index < line.length && consumedColumns < columnsToRemove) {
+		const char = line[index];
+		if (char === ' ') {
+			consumedColumns += 1;
+			index += 1;
+			continue;
+		}
+
+		if (char === '\t') {
+			const tabWidth = 4 - (consumedColumns % 4);
+			consumedColumns += tabWidth === 0 ? 4 : tabWidth;
+			index += 1;
+			continue;
+		}
+
+		break;
+	}
+
+	return consumedColumns >= columnsToRemove ? line.slice(index) : line;
 }
 
 class ReferencePostProcessChild extends MarkdownRenderChild {
@@ -1105,7 +1196,7 @@ export default class BlockReferenceEnhancer extends Plugin {
 		await this.renderMarkdownAndProcess(rootContainer, block.rawContent, sourcePath, component, nextVisitedEmbeds);
 		contentNodes.push(rootContainer);
 
-		const childMarkdown = block.childrenMarkdown?.trim();
+		const childMarkdown = normalizeEmbedChildrenMarkdown(block.childrenMarkdown ?? '');
 		if (childMarkdown) {
 			const childrenContainer = container.ownerDocument.createElement('div');
 			childrenContainer.addClass('block-reference-embed-children');

@@ -597,7 +597,7 @@ export class IndexService extends Events {
         const didChange = true;
         if (emitUpdate) {
             this.scheduleSave();
-            this.notifyIndexUpdated();
+            this.notifyIndexUpdated(file.path);
         }
 
         return didChange;
@@ -944,12 +944,19 @@ export class IndexService extends Events {
         this.trigger('index-status', status);
     }
 
-    private notifyIndexUpdated() {
+    private notifyIndexUpdated(updatedFilePath?: string) {
         this.indexRevision += 1;
-        this.trigger('index-updated', {
+        const payload = {
             revision: this.indexRevision,
             stats: this.getStats(),
-        });
+        };
+        this.trigger('index-updated', payload);
+        if (updatedFilePath) {
+            this.trigger('index-file-updated', {
+                ...payload,
+                filePath: updatedFilePath,
+            });
+        }
     }
 
     private async ensureRecoveryFolderExists() {
