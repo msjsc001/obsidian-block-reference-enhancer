@@ -175,7 +175,7 @@ Default recovery page:
 
 ## ⚙️ Property Hiding Settings
 
-The plugin now includes a setting to hide Logseq-style property lines, and it is enabled by default.
+The plugin now includes a setting to hide Logseq-style property lines. It is on by default for new installs, while existing users keep their saved preference.
 
 You can change it in:
 - `Settings -> Community plugins -> Block Reference Enhancer`
@@ -189,6 +189,8 @@ Rule notes:
 The default rule set already includes common properties such as id, collapsed, hl-*, and ls-type.
 
 This feature only hides matching property-line display under unordered-list blocks and does not modify the original Markdown.
+
+When this option is enabled, pressing `Enter` on a non-empty outline block in Live Preview creates a first child block and keeps hidden property or continuation lines attached to the parent block.
 
 ## 📦 First Launch and Indexing
 
@@ -247,16 +249,63 @@ If you run into a problem:
 
 ## 🧩 Recommended Companion Plugins
 
-Primary recommendations:
-- `Outliner`
-- `Zoom`
+### Outline / Hierarchy Editing
 
-Secondary recommendations:
-- `Better Search Views`
-- `PDF++`
-- `Recent Files`
-- `Tag Wrangler`
-- `Toggle Readable line length`
+- 🔴 `Outliner`
+  Feature: improves list, outline, indent, moving, and hierarchy editing.
+  Use: makes Obsidian feel closer to Logseq / Workflowy / Roam style outlining.
+  Useful detail: `Ctrl + Shift + Up/Down` moves outline blocks; in Logseq a common shortcut is `Alt + Shift + Up/Down`.
+- 🔴 `Zoom`
+  Feature: focuses on a heading or list level.
+  Use: lets you isolate one section or one hierarchy level in a long note and reduce distraction.
+
+### Search / Navigation / Quick Location
+
+- 🔴 `Better Search Views`
+  Feature: improves how search, backlinks, and embedded query results are displayed.
+  Use: makes results feel more like outline breadcrumbs with clearer context.
+- 🔴 `Recent Files`
+  Feature: shows recently opened files.
+  Use: helps you jump back to notes you just edited or reviewed.
+
+### Image Handling And Reading
+
+- 🔴 `Image Converter`
+  Feature: handles image paste, drag-in, format conversion, compression, renaming, and link formatting.
+  Use: helps normalize pasted images into a more portable format such as:
+
+  ```md
+  ![](../assets/xxx.png)
+  ```
+
+### Visual Thinking / PDF Reading
+
+- 🔴 `PDF++`
+  Feature: improves PDF reading, annotation, citation, and linking.
+  Use: connects PDF source material more tightly with your Obsidian notes; with the right setup it also works well alongside Logseq-style workflows.
+- `Excalidraw`
+  Feature: draws diagrams, whiteboards, flowcharts, and sketches inside Obsidian.
+  Use: useful for structure diagrams, mind maps, process charts, and visual notes.
+
+### Editing And Reading Experience
+
+- 🔴 `Codeblock Customizer`
+  Feature: improves code block presentation.
+  Use: makes code blocks, config blocks, and long text blocks easier to read inside outline notes.
+- 🔴 `Toggle Readable line length`
+  Feature: quickly toggles Obsidian's readable line width.
+  Use: switches between narrow reading mode and wide-screen editing.
+  Useful detail: `Ctrl + Shift + E`
+- `Simplified Chinese Word Splitting`
+  Feature: improves Chinese word splitting.
+  Use: improves cursor movement, word selection, and deletion behavior while editing Chinese text.
+
+### Tag Management
+
+- 🔴 `Tag Wrangler`
+  Feature: renames, merges, and organizes tags.
+  Use: helps keep tag structures maintainable over time.
+  Useful detail: you can continue tag management from a right-click action on tags.
 
 ## ⚠️ Known Limitations
 
@@ -291,6 +340,6 @@ Release notes:
 ## 🗺 Roadmap
 
 Planned directions include:
-- right-click source creation for block references and embeds: let native Obsidian unordered list blocks support right-click creation of source IDs with `id:: uuid`
+- refine outline interactions so Enter, Delete, and related editing behaviors feel closer to dedicated professional outliner software
 - search feature: provide a plugin search view that searches real block content instead of only the raw `((uuid))` syntax
 - more block-oriented workflows built on the current index and cache foundation
