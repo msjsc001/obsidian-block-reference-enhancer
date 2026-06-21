@@ -10,12 +10,12 @@ import {
     PaginatedBlockReferences,
     ParsedMarkdownFile,
     PersistedIndexCacheV3,
+    PersistedIndexCacheV4,
     SourceBlockRecord,
     StaleBlockRecord,
 } from '../types';
 import { BlockParser } from './BlockParser';
-
-const CACHE_SCHEMA_VERSION = 3;
+import { INDEX_CACHE_PARSER_REVISION, INDEX_CACHE_SCHEMA_VERSION, resolveIndexCacheCompatibility } from './IndexCacheCompatibility';
 const RECOVERY_PAGE_PATH = 'pages/Block Recovery.md';
 
 interface BuildOptions {
@@ -29,8 +29,8 @@ interface InitializeCallbacks {
 }
 
 interface IndexCacheStore {
-    load: () => Promise<PersistedIndexCacheV3 | LegacyPersistedBlockCacheEntry[] | null>;
-    save: (cache: PersistedIndexCacheV3) => Promise<void>;
+    load: () => Promise<PersistedIndexCacheV4 | PersistedIndexCacheV3 | LegacyPersistedBlockCacheEntry[] | null>;
+    save: (cache: PersistedIndexCacheV4) => Promise<void>;
 }
 
 interface ReconcileResult {
@@ -68,9 +68,19 @@ export class IndexService extends Events {
 
     public async initialize(callbacks: InitializeCallbacks = {}) {
         this.emitStatus({ state: 'loading-cache' }, callbacks.onStatus);
-        const loaded = await this.loadIndexFromCache();
-        if (!loaded) {
+        const cacheLoadResult = await this.loadIndexFromCache();
+        if (cacheLoadResult === 'missing') {
             this.emitStatus({ state: 'cache-missing' }, callbacks.onStatus);
+            const stats = await this.rebuildIndex({
+                phase: 'rebuild',
+                onProgress: callbacks.onProgress,
+            });
+            this.emitStatus({ state: 'ready', source: 'rebuild', stats }, callbacks.onStatus);
+            return;
+        }
+
+        if (cacheLoadResult === 'invalidated') {
+            this.emitStatus({ state: 'cache-invalidated' }, callbacks.onStatus);
             const stats = await this.rebuildIndex({
                 phase: 'rebuild',
                 onProgress: callbacks.onProgress,
@@ -700,37 +710,32 @@ export class IndexService extends Events {
         return this.blockParser.parse(file.path, content);
     }
 
-    private async loadIndexFromCache(): Promise<boolean> {
+    private async loadIndexFromCache(): Promise<'missing' | 'invalidated' | 'loaded'> {
         try {
             const parsed = await this.cacheStore.load();
-            if (!parsed) {
-                return false;
+            const compatibility = resolveIndexCacheCompatibility(parsed);
+            if (compatibility.state === 'missing' || compatibility.state === 'invalidated') {
+                return compatibility.state;
+            }
+            if (!compatibility.cache) {
+                return 'invalidated';
             }
 
-            if (Array.isArray(parsed)) {
-                this.loadLegacyCache(parsed);
-                this.notifyIndexUpdated();
-                return true;
-            }
-
-            if (parsed.schemaVersion !== CACHE_SCHEMA_VERSION) {
-                return false;
-            }
-
+            const currentCache = compatibility.cache;
             this.fileMetaByPath = new Map(
-                Object.entries(parsed.files).map(([path, meta]) => [path, { ...meta }])
+                Object.entries(currentCache.files).map(([path, meta]) => [path, { ...meta }])
             );
             this.blocksById = new Map(
-                Object.entries(parsed.blocks).map(([id, block]) => {
+                Object.entries(currentCache.blocks).map(([id, block]) => {
                     const fallbackMeta = this.fileMetaByPath.get(block.filePath);
                     return [id, this.normalizeLoadedBlock(id, block, fallbackMeta?.mtime)];
                 })
             );
             this.refsById = new Map(
-                Object.entries(parsed.refsById).map(([id, references]) => [id, references.map((reference) => ({ ...reference }))])
+                Object.entries(currentCache.refsById).map(([id, references]) => [id, references.map((reference) => ({ ...reference }))])
             );
             this.sourceBlocksByFile = new Map(
-                Object.entries(parsed.sourceBlocksByFile).map(([path, blocks]) => {
+                Object.entries(currentCache.sourceBlocksByFile).map(([path, blocks]) => {
                     const fallbackMeta = this.fileMetaByPath.get(path);
                     return [
                         path,
@@ -740,38 +745,10 @@ export class IndexService extends Events {
             );
             this.rebuildActiveSourceBlocksById();
             this.notifyIndexUpdated();
-            return true;
+            return 'loaded';
         } catch (error) {
             console.error('Error loading index from cache:', error);
-            return false;
-        }
-    }
-
-    private loadLegacyCache(entries: LegacyPersistedBlockCacheEntry[]) {
-        const now = Date.now();
-        this.blocksById = new Map();
-        this.refsById = new Map();
-        this.fileMetaByPath = new Map();
-        this.sourceBlocksByFile = new Map();
-        this.activeSourceBlocksById = new Map();
-
-        for (const [id, block] of entries as unknown as [string, LegacyPersistedBlockCacheEntry[1]][]) {
-            const loadedBlock: BlockCache = {
-                id,
-                filePath: block.filePath,
-                rawContent: block.rawContent,
-                childrenMarkdown: block.childrenMarkdown ?? '',
-                startLine: block.startLine,
-                endLine: block.startLine,
-                childrenIDs: block.childrenIDs ?? [],
-                sourceUpdatedAt: now,
-                status: 'active',
-                firstSeenAt: now,
-                lastSeenAt: now,
-            };
-            this.blocksById.set(id, loadedBlock);
-            this.upsertSourceBlockForFile(block.filePath, loadedBlock);
-            this.upsertActiveSourceBlock(loadedBlock);
+            return 'invalidated';
         }
     }
 
@@ -914,8 +891,9 @@ export class IndexService extends Events {
 
     private async saveIndexToCache() {
         try {
-            const persisted: PersistedIndexCacheV3 = {
-                schemaVersion: CACHE_SCHEMA_VERSION,
+            const persisted: PersistedIndexCacheV4 = {
+                schemaVersion: INDEX_CACHE_SCHEMA_VERSION,
+                parserRevision: INDEX_CACHE_PARSER_REVISION,
                 builtAt: Date.now(),
                 files: Object.fromEntries(this.fileMetaByPath.entries()),
                 blocks: Object.fromEntries(this.blocksById.entries()),

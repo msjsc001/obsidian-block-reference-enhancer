@@ -201,6 +201,7 @@ On first launch, watch the status bar for `Block index: ...`.
 Common states:
 - `loading cache...` means the plugin is reading its local cache.
 - `no cache found, building full index...` means a first full build is running.
+- `cache outdated, rebuilding full index...` means an older cache format or parser result was detected and a full rebuild is running automatically.
 - `cache loaded, checking vault changes...` means cached data was found and is being validated.
 - `reconciling X/Y files ...` means changed or removed files are being compared against the cache.
 - `ready | F files | B blocks | R refs` means startup indexing is complete.
@@ -208,6 +209,8 @@ Common states:
 Normal create, modify, delete, and rename updates after startup are incremental and usually happen silently.
 
 Source-block text changes are also handled incrementally after save. The plugin does not wait for a full rebuild, and it does not try to mirror every keystroke across the vault while you are still editing.
+
+When parser capabilities change and older cached results are no longer trustworthy, the plugin now invalidates that cache automatically on first launch and performs one full rebuild. Users do not need to delete `data.json` or manually run `Rebuild block reference index` first.
 
 ## 🛟 Safety: What Happens When a Source Block Goes Missing
 

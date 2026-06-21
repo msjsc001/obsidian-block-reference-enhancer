@@ -10,6 +10,7 @@ import { BlockRenderMode } from "./BlockReferenceWidget";
 import BlockReferenceEnhancer from "src/main";
 import { isHtmlElement } from "src/utils/dom";
 import { replaceChildrenFromHtml } from "src/utils/html";
+import { getOpeningMarkdownFenceState, isClosingMarkdownFence, type MarkdownFenceState } from "src/utils/markdownFence";
 
 interface BlockRenderTarget {
     from: number;
@@ -37,11 +38,6 @@ interface BlockRenderTarget {
     lineHeightPx?: number;
     reservedHeightPx?: number;
     indexRevision?: number;
-}
-
-interface FenceState {
-    char: "`" | "~";
-    length: number;
 }
 
 interface RunningRenderTask {
@@ -83,7 +79,6 @@ interface VisibleScanRange {
 const EMBED_BLOCK_REF_REGEX = /\{\{embed\s+\(\(([A-Za-z0-9_-]{36,})\)\)\s*\}\}/y;
 const INLINE_BLOCK_REF_REGEX = /\(\(([A-Za-z0-9_-]{36,})\)\)/y;
 const FULLWIDTH_INLINE_BLOCK_REF_REGEX = /（（([A-Za-z0-9_-]{36,})））/y;
-const FENCE_REGEX = /^\s{0,3}(`{3,}|~{3,})/;
 const LIVE_PREVIEW_DOC_SCAN_DEBOUNCE_MS = 450;
 const LIVE_PREVIEW_VIEWPORT_SCAN_DEBOUNCE_MS = 120;
 const LIVE_PREVIEW_INTERNAL_LAYOUT_RESCAN_DEBOUNCE_MS = 320;
@@ -112,24 +107,6 @@ function buildRenderSignature(target: BlockRenderTarget): string {
 
 function getTargetRefId(target: BlockRenderTarget): string {
     return target.refId ?? `${target.mode}:${target.from}:${target.to}`;
-}
-
-function getFenceState(line: string): FenceState | null {
-    const match = line.match(FENCE_REGEX);
-    if (!match) {
-        return null;
-    }
-
-    const marker = match[1];
-    return {
-        char: marker[0] as FenceState["char"],
-        length: marker.length,
-    };
-}
-
-function isClosingFence(line: string, fenceState: FenceState): boolean {
-    const closingRegex = new RegExp(`^\\s{0,3}${fenceState.char}{${fenceState.length},}\\s*$`);
-    return closingRegex.test(line);
 }
 
 function findInlineCodeSpanEnd(line: string, start: number): number {
@@ -234,7 +211,7 @@ function collectRenderTargets(text: string): BlockRenderTarget[] {
 
     let offset = 0;
     let inFrontmatter = lines[0]?.trim() === "---";
-    let fenceState: FenceState | null = null;
+    let fenceState: MarkdownFenceState | null = null;
 
     for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
         const line = lines[lineIndex];
@@ -248,14 +225,14 @@ function collectRenderTargets(text: string): BlockRenderTarget[] {
         }
 
         if (fenceState) {
-            if (isClosingFence(line, fenceState)) {
+            if (isClosingMarkdownFence(line, fenceState)) {
                 fenceState = null;
             }
             offset += line.length + 1;
             continue;
         }
 
-        const nextFenceState = getFenceState(line);
+        const nextFenceState = getOpeningMarkdownFenceState(line);
         if (nextFenceState) {
             fenceState = nextFenceState;
             offset += line.length + 1;

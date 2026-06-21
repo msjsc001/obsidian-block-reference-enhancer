@@ -14,19 +14,13 @@ import {
 	collectHiddenLogseqPropertyLineNumbers,
 } from '../services/LogseqPropertyMatcher';
 import { isDomNode } from '../utils/dom';
+import { getOpeningMarkdownFenceState, isClosingMarkdownFence, type MarkdownFenceState } from '../utils/markdownFence';
 
 const PROPERTY_HIDE_DOC_SCAN_DEBOUNCE_MS = 220;
 const PROPERTY_HIDE_VIEWPORT_SCAN_DEBOUNCE_MS = 100;
 const PROPERTY_HIDE_VISIBLE_MARGIN_LINES = 10;
 const UNORDERED_LIST_LINE_REGEX = /^\s*-\s+/;
 const UNORDERED_LIST_INSERTION_PREFIX_REGEX = /^(\s*-\s+(?:\[[ xX-]\]\s+)?)/;
-const FENCE_REGEX = /^\s{0,3}(`{3,}|~{3,})/;
-
-interface FenceState {
-	char: '`' | '~';
-	length: number;
-}
-
 interface VisibleLineRange {
 	fromLine: number;
 	toLine: number;
@@ -265,7 +259,7 @@ function resolveHiddenPropertyAwareEnterTarget(
 	const currentListIndentColumns = currentLineInfo.indentColumns;
 	const continuationIndentColumns = currentLineInfo.contentIndentColumns;
 
-	let fenceState: FenceState | null = null;
+	let fenceState: MarkdownFenceState | null = null;
 	let insertFrom = doc.length;
 	let childInsertionPrefix: string | null = null;
 
@@ -274,7 +268,7 @@ function resolveHiddenPropertyAwareEnterTarget(
 		const lineText = line.text;
 
 		if (fenceState) {
-			if (isClosingFence(lineText, fenceState)) {
+			if (isClosingMarkdownFence(lineText, fenceState, tabSize)) {
 				fenceState = null;
 			}
 			continue;
@@ -297,7 +291,7 @@ function resolveHiddenPropertyAwareEnterTarget(
 		}
 
 		const lineIndentColumns = countColumn(lineText.match(/^(\s*)/)?.[1] ?? '', tabSize);
-		const nextFenceState = getFenceState(lineText);
+		const nextFenceState = getOpeningMarkdownFenceState(lineText, tabSize);
 		if (nextFenceState && lineIndentColumns >= continuationIndentColumns) {
 			fenceState = nextFenceState;
 			continue;
@@ -354,22 +348,4 @@ function parseUnorderedListLineInfo(lineText: string, tabSize: number): Unordere
 function buildChildInsertionPrefix(parentLeadingWhitespace: string, state: EditorState): string {
 	const unit = indentString(state, getIndentUnit(state)) || '\t';
 	return `${parentLeadingWhitespace}${unit}- `;
-}
-
-function getFenceState(line: string): FenceState | null {
-	const match = line.match(FENCE_REGEX);
-	if (!match) {
-		return null;
-	}
-
-	const marker = match[1];
-	return {
-		char: marker[0] as FenceState['char'],
-		length: marker.length,
-	};
-}
-
-function isClosingFence(line: string, fenceState: FenceState): boolean {
-	const closingRegex = new RegExp(`^\\s{0,3}${fenceState.char}{${fenceState.length},}\\s*$`);
-	return closingRegex.test(line);
 }

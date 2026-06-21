@@ -205,6 +205,7 @@ Obsidian 打开命令面板快捷键：
 常见状态包括：
 - `loading cache...`：正在读取本地缓存
 - `no cache found, building full index...`：没有缓存，正在做第一次完整建索引
+- `cache outdated, rebuilding full index...`：缓存来自旧解析规则或旧格式，正在自动完整重建
 - `cache loaded, checking vault changes...`：缓存已加载，正在核对库内文件变化
 - `reconciling X/Y files ...`：正在把变更文件和缓存重新对齐
 - `ready | F files | B blocks | R refs`：启动期索引已经完成
@@ -212,6 +213,8 @@ Obsidian 打开命令面板快捷键：
 启动后的正常增删改重命名，通常会静默增量更新，不会一直弹提示。
 
 源块文字内容的变化，在保存后也会走静默增量更新，不需要整库重建；同时也不会在你还在当前编辑器逐字输入时，强行把全库引用做成高成本实时联动。
+
+当插件的解析能力升级，且旧缓存已经不再可靠时，插件会在首次启动自动判定缓存过期，并做一次完整重建；这时不需要手动删除 `data.json` 或先执行 `Rebuild block reference index`。
 
 ## 🛟 安全措施：源块丢失时会怎样
 

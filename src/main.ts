@@ -5,12 +5,13 @@ import { blockReferenceField } from './editor/BlockReferenceField';
 import { createAsyncBlockRendererPlugin } from './editor/AsyncBlockRendererPlugin';
 import { createSourceReferenceBadgePlugin } from './editor/SourceReferenceBadgePlugin';
 import { createLogseqPropertyHidePlugin } from './editor/LogseqPropertyHidePlugin';
-import { BlockCache, BlockReferenceLocation, IndexBuildStats, IndexProgress, IndexStatus, LegacyPersistedBlockCacheEntry, PersistedIndexCacheV3, ReferencePreviewContext } from './types';
+import { BlockCache, BlockReferenceLocation, IndexBuildStats, IndexProgress, IndexStatus, LegacyPersistedBlockCacheEntry, PersistedIndexCacheV3, PersistedIndexCacheV4, ReferencePreviewContext } from './types';
 import { StaleBlockReviewModal } from './ui/StaleBlockReviewModal';
 import { createSourceReferenceBadgeElement } from './ui/SourceReferenceBadgeElement';
 import { createSourceBlockBackButtonElement } from './ui/SourceBlockBackButtonElement';
 import { SourceReferencePopover } from './ui/SourceReferencePopover';
 import { isHtmlElement } from './utils/dom';
+import { getOpeningMarkdownFenceState, isClosingMarkdownFence, type MarkdownFenceState } from './utils/markdownFence';
 import { serializeChildrenToHtml } from './utils/html';
 import { BlockReferenceEnhancerSettingTab } from './ui/BlockReferenceEnhancerSettingTab';
 import { DEFAULT_HIDDEN_LOGSEQ_PROPERTY_KEYS, HiddenLogseqPropertyMatcher, buildHiddenLogseqPropertyMatcher, isHiddenLogseqPropertyKey, isHiddenLogseqPropertyLineText, parseHiddenLogseqPropertyLine } from './services/LogseqPropertyMatcher';
@@ -22,7 +23,7 @@ export interface BlockReferenceEnhancerSettings {
 
 interface BlockReferenceEnhancerPersistedData {
 	settings?: Partial<BlockReferenceEnhancerSettings>;
-	indexCache?: PersistedIndexCacheV3 | LegacyPersistedBlockCacheEntry[] | null;
+	indexCache?: PersistedIndexCacheV4 | PersistedIndexCacheV3 | LegacyPersistedBlockCacheEntry[] | null;
 }
 
 const DEFAULT_SETTINGS: BlockReferenceEnhancerSettings = {
@@ -1645,6 +1646,11 @@ export default class BlockReferenceEnhancer extends Plugin {
 				this.setIndexStatusMessage('Block index: no cache found, building full index...');
 				new Notice('No cached block index found. Building a new index...');
 				return;
+			case 'cache-invalidated':
+				this.startupFullRebuildPending = true;
+				this.setIndexStatusMessage('Block index: cache outdated, rebuilding full index...');
+				new Notice('Cached block index is outdated. Rebuilding a new index...');
+				return;
 			case 'cache-loaded':
 				this.setIndexStatusMessage(
 					this.buildStatusText('Block index: cache loaded, checking vault changes...', status.stats)
@@ -1754,16 +1760,31 @@ export default class BlockReferenceEnhancer extends Plugin {
 		const sourceLine = lines[startLine] ?? '';
 		const baseIndent = this.measureIndentColumns(sourceLine.match(/^(\s*)/)?.[1] ?? '');
 		const hiddenLineTexts: string[] = [];
+		let fenceState: MarkdownFenceState | null = null;
 
 		for (let lineNumber = startLine + 1; lineNumber < lines.length && lineNumber <= lineEnd; lineNumber++) {
 			const line = lines[lineNumber];
+			const indentation = this.measureIndentColumns(line.match(/^(\s*)/)?.[1] ?? '');
+
+			if (fenceState) {
+				if (isClosingMarkdownFence(line, fenceState)) {
+					fenceState = null;
+				}
+				continue;
+			}
+
+			const nextFenceState = getOpeningMarkdownFenceState(line);
+			if (nextFenceState && indentation > baseIndent) {
+				fenceState = nextFenceState;
+				continue;
+			}
+
 			if (line.trim().length === 0) {
 				continue;
 			}
 
 			const parsedLine = parseHiddenLogseqPropertyLine(line);
 			if (!parsedLine) {
-				const indentation = this.measureIndentColumns(line.match(/^(\s*)/)?.[1] ?? '');
 				if (indentation <= baseIndent) {
 					break;
 				}

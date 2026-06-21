@@ -1,4 +1,5 @@
 import { BlockCache, BlockReferenceLocation, ParsedMarkdownFile } from '../types';
+import { getOpeningMarkdownFenceState, isClosingMarkdownFence, type MarkdownFenceState } from '../utils/markdownFence';
 
 interface BlockInProgress {
     block: BlockCache;
@@ -6,15 +7,9 @@ interface BlockInProgress {
     id?: string;
 }
 
-interface FenceState {
-    char: '`' | '~';
-    length: number;
-}
-
 const EMBED_BLOCK_REF_REGEX = /\{\{embed\s+\(\(([A-Za-z0-9_-]{36,})\)\)\s*\}\}/y;
 const INLINE_BLOCK_REF_REGEX = /\(\(([A-Za-z0-9_-]{36,})\)\)/y;
 const FULLWIDTH_INLINE_BLOCK_REF_REGEX = /（（([A-Za-z0-9_-]{36,})））/y;
-const FENCE_REGEX = /^\s{0,3}(`{3,}|~{3,})/;
 
 /**
  * Parses UUID-style outline Markdown files to extract source blocks and references.
@@ -37,9 +32,25 @@ export class BlockParser {
         const allFoundBlocks: BlockInProgress[] = [];
         const parentStack: BlockInProgress[] = [];
         let inPageProperties = true;
+        let fenceState: MarkdownFenceState | null = null;
 
         for (let lineNumber = 0; lineNumber < lines.length; lineNumber++) {
             const line = lines[lineNumber];
+
+            if (fenceState) {
+                const lastBlock = allFoundBlocks[allFoundBlocks.length - 1];
+                if (lastBlock) {
+                    const lineIndentation = this.getLineIndentation(line);
+                    if (line.trim() === '' ? lineIndentation > lastBlock.indentation : lineIndentation > lastBlock.indentation) {
+                        this.appendBlockContinuation(lastBlock, line, lineNumber, parentStack);
+                    }
+                }
+
+                if (isClosingMarkdownFence(line, fenceState)) {
+                    fenceState = null;
+                }
+                continue;
+            }
 
             if (inPageProperties) {
                 if (this.PAGE_PROPS_REGEX.test(line) || line.trim() === '') {
@@ -87,6 +98,11 @@ export class BlockParser {
 
                 parentStack.push(newBlock);
                 allFoundBlocks.push(newBlock);
+
+                const openingFenceState = getOpeningMarkdownFenceState(line);
+                if (openingFenceState) {
+                    fenceState = openingFenceState;
+                }
                 continue;
             }
 
@@ -100,6 +116,13 @@ export class BlockParser {
                 if (lineIndentation > lastBlock.indentation) {
                     this.appendBlockContinuation(lastBlock, line, lineNumber, parentStack);
                 }
+                continue;
+            }
+
+            const nextFenceState = getOpeningMarkdownFenceState(line);
+            if (nextFenceState && lineIndentation > lastBlock.indentation) {
+                this.appendBlockContinuation(lastBlock, line, lineNumber, parentStack);
+                fenceState = nextFenceState;
                 continue;
             }
 
@@ -147,7 +170,7 @@ export class BlockParser {
         const referencesById = new Map<string, BlockReferenceLocation[]>();
         const lines = content.split('\n');
         let inFrontmatter = lines[0]?.trim() === '---';
-        let fenceState: FenceState | null = null;
+        let fenceState: MarkdownFenceState | null = null;
 
         for (let lineNumber = 0; lineNumber < lines.length; lineNumber++) {
             const line = lines[lineNumber];
@@ -160,13 +183,13 @@ export class BlockParser {
             }
 
             if (fenceState) {
-                if (this.isClosingFence(line, fenceState)) {
+                if (isClosingMarkdownFence(line, fenceState)) {
                     fenceState = null;
                 }
                 continue;
             }
 
-            const nextFenceState = this.getFenceState(line);
+            const nextFenceState = getOpeningMarkdownFenceState(line);
             if (nextFenceState) {
                 fenceState = nextFenceState;
                 continue;
@@ -275,24 +298,6 @@ export class BlockParser {
     private getLineIndentation(line: string): number {
         const match = line.match(/^(\s*)/);
         return match ? match[1].length : 0;
-    }
-
-    private getFenceState(line: string): FenceState | null {
-        const match = line.match(FENCE_REGEX);
-        if (!match) {
-            return null;
-        }
-
-        const marker = match[1];
-        return {
-            char: marker[0] as FenceState['char'],
-            length: marker.length,
-        };
-    }
-
-    private isClosingFence(line: string, fenceState: FenceState): boolean {
-        const closingRegex = new RegExp(`^\\s{0,3}${fenceState.char}{${fenceState.length},}\\s*$`);
-        return closingRegex.test(line);
     }
 
     private findInlineCodeSpanEnd(line: string, start: number): number {

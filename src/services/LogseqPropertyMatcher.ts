@@ -1,7 +1,9 @@
-interface FenceState {
-	char: '`' | '~';
-	length: number;
-}
+import {
+	getOpeningMarkdownFenceState,
+	isClosingMarkdownFence,
+	measureIndentColumns as measureMarkdownFenceIndentColumns,
+	type MarkdownFenceState,
+} from '../utils/markdownFence';
 
 export interface HiddenLogseqPropertyMatcher {
 	exactKeys: ReadonlySet<string>;
@@ -14,7 +16,6 @@ export const DEFAULT_HIDDEN_LOGSEQ_PROPERTY_KEYS = '.lsp-*\\\\.v-*\\\\alias\\\\a
 const RULE_SEPARATOR = '\\\\';
 const PROPERTY_LINE_REGEX = /^\s*([^:\s][^:]*)::(?:\s*(.*))?$/;
 const UNORDERED_LIST_LINE_REGEX = /^\s*-\s+/;
-const FENCE_REGEX = /^\s{0,3}(`{3,}|~{3,})/;
 
 interface StructureEntry {
 	indentColumns: number;
@@ -49,12 +50,7 @@ export function buildHiddenLogseqPropertyMatcher(rawRules: string): HiddenLogseq
 }
 
 export function measureIndentColumns(value: string): number {
-	let columns = 0;
-	for (const char of value) {
-		columns += char === '\t' ? 4 : 1;
-	}
-
-	return columns;
+	return measureMarkdownFenceIndentColumns(value);
 }
 
 export function parseHiddenLogseqPropertyLine(line: string): { key: string; indentColumns: number } | null {
@@ -100,25 +96,15 @@ export function collectHiddenLogseqPropertyLineNumbers(
 	const hiddenLines = new Set<number>();
 	const lines = docText.split(/\r?\n/);
 	const structureStack: StructureEntry[] = [];
-	let fenceState: FenceState | null = null;
+	let fenceState: MarkdownFenceState | null = null;
 
 	for (let index = 0; index < lines.length; index++) {
 		const line = lines[index];
 
 		if (fenceState) {
-			if (isClosingFence(line, fenceState)) {
+			if (isClosingMarkdownFence(line, fenceState)) {
 				fenceState = null;
 			}
-			continue;
-		}
-
-		const nextFenceState = getFenceState(line);
-		if (nextFenceState) {
-			fenceState = nextFenceState;
-			continue;
-		}
-
-		if (line.trim().length === 0) {
 			continue;
 		}
 
@@ -126,6 +112,22 @@ export function collectHiddenLogseqPropertyLineNumbers(
 		const indentColumns = measureIndentColumns(indentation);
 		while (structureStack.length > 0 && structureStack[structureStack.length - 1].indentColumns >= indentColumns) {
 			structureStack.pop();
+		}
+
+		const nextFenceState = getOpeningMarkdownFenceState(line);
+		if (nextFenceState) {
+			if (UNORDERED_LIST_LINE_REGEX.test(line)) {
+				structureStack.push({
+					indentColumns,
+					isUnorderedList: true,
+				});
+			}
+			fenceState = nextFenceState;
+			continue;
+		}
+
+		if (line.trim().length === 0) {
+			continue;
 		}
 
 		const parsedPropertyLine = parseHiddenLogseqPropertyLine(line);
@@ -144,22 +146,4 @@ export function collectHiddenLogseqPropertyLineNumbers(
 	}
 
 	return hiddenLines;
-}
-
-function getFenceState(line: string): FenceState | null {
-	const match = line.match(FENCE_REGEX);
-	if (!match) {
-		return null;
-	}
-
-	const marker = match[1];
-	return {
-		char: marker[0] as FenceState['char'],
-		length: marker.length,
-	};
-}
-
-function isClosingFence(line: string, fenceState: FenceState): boolean {
-	const closingRegex = new RegExp(`^\\s{0,3}${fenceState.char}{${fenceState.length},}\\s*$`);
-	return closingRegex.test(line);
 }

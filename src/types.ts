@@ -54,6 +54,16 @@ export interface PersistedIndexCacheV3 {
     sourceBlocksByFile: Record<string, BlockCache[]>;
 }
 
+export interface PersistedIndexCacheV4 {
+    schemaVersion: 4;
+    parserRevision: number;
+    builtAt: number;
+    files: Record<string, FileIndexMeta>;
+    blocks: Record<string, BlockCache>;
+    refsById: Record<string, BlockReferenceLocation[]>;
+    sourceBlocksByFile: Record<string, BlockCache[]>;
+}
+
 export interface LegacyPersistedBlockCacheEntry {
     0: string;
     1: {
@@ -85,7 +95,7 @@ export interface IndexProgress {
 export type IndexReadySource = 'cache' | 'reconcile' | 'rebuild';
 
 export interface IndexStatus {
-    state: 'loading-cache' | 'cache-missing' | 'cache-loaded' | 'reconcile-start' | 'ready';
+    state: 'loading-cache' | 'cache-missing' | 'cache-invalidated' | 'cache-loaded' | 'reconcile-start' | 'ready';
     stats?: IndexBuildStats;
     source?: IndexReadySource;
     changedFiles?: number;
