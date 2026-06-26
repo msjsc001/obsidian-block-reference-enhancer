@@ -190,7 +190,11 @@ The default rule set already includes common properties such as id, collapsed, h
 
 This feature only hides matching property-line display under unordered-list blocks and does not modify the original Markdown.
 
-When this option is enabled, pressing `Enter` on a non-empty outline block in Live Preview creates a first child block and keeps hidden property or continuation lines attached to the parent block.
+When this option is enabled, pressing `Enter` on a non-empty outline block in Live Preview behaves like this:
+- If the current block already has direct child list items, a new first child block is created.
+- If the current block does not have direct child list items yet, a new same-level sibling block is created.
+
+In both cases, hidden property lines and continuation lines stay attached to the original parent block instead of being migrated into the new block.
 
 ## 📦 First Launch and Indexing
 

@@ -6,9 +6,10 @@ import {
 	countColumn,
 	type Extension,
 	type EditorState,
+	type StateEffect,
 } from '@codemirror/state';
 import { Decoration, DecorationSet, EditorView, ViewPlugin, ViewUpdate } from '@codemirror/view';
-import { getIndentUnit, indentString } from '@codemirror/language';
+import { foldState, foldedRanges, getIndentUnit, indentString, unfoldEffect } from '@codemirror/language';
 import type BlockReferenceEnhancer from '../main';
 import {
 	collectHiddenLogseqPropertyLineNumbers,
@@ -39,6 +40,12 @@ interface HiddenPropertyAwareEnterTarget {
 	replaceTo: number;
 	replaceText: string;
 	selectionHead: number;
+}
+
+interface UnorderedListStructure {
+	firstDirectChildFrom: number | null;
+	firstDirectChildInsertionPrefix: string | null;
+	parentTailEnd: number;
 }
 
 function getVisibleLineRanges(view: EditorView): VisibleLineRange[] {
@@ -75,6 +82,7 @@ export function createLogseqPropertyHidePlugin(plugin: BlockReferenceEnhancer): 
 			private analyzedDocFingerprint = '';
 			private decorationsFingerprint = '';
 			private hiddenLineNumbers: number[] = [];
+			private hiddenLineNumberSet = new Set<number>();
 
 			constructor(private readonly view: EditorView) {
 				this.settingsChangedRef = plugin.onLogseqPropertySettingsChanged(() => {
@@ -91,11 +99,16 @@ export function createLogseqPropertyHidePlugin(plugin: BlockReferenceEnhancer): 
 				if (update.docChanged) {
 					this.decorations = this.decorations.map(update.changes);
 					this.analyzedDocFingerprint = '';
+					this.hiddenLineNumberSet.clear();
 					this.scheduleRefresh(PROPERTY_HIDE_DOC_SCAN_DEBOUNCE_MS);
 					return;
 				}
 
-				if (update.viewportChanged || update.focusChanged) {
+				if (
+					update.viewportChanged
+					|| update.focusChanged
+					|| update.startState.field(foldState, false) !== update.state.field(foldState, false)
+				) {
 					this.scheduleRefresh(PROPERTY_HIDE_VIEWPORT_SCAN_DEBOUNCE_MS);
 				}
 			}
@@ -131,6 +144,10 @@ export function createLogseqPropertyHidePlugin(plugin: BlockReferenceEnhancer): 
 				}
 
 				this.ensureHiddenLineNumbers();
+				if (this.maybeRepairHiddenPropertyFoldRanges()) {
+					return;
+				}
+
 				const visibleRanges = getVisibleLineRanges(this.view);
 				const builder = new RangeSetBuilder<Decoration>();
 				const fingerprintParts: string[] = [
@@ -178,6 +195,29 @@ export function createLogseqPropertyHidePlugin(plugin: BlockReferenceEnhancer): 
 				this.hiddenLineNumbers = Array.from(
 					collectHiddenLogseqPropertyLineNumbers(this.view.state.doc.toString(), matcher),
 				).sort((left, right) => left - right);
+				this.hiddenLineNumberSet = new Set(this.hiddenLineNumbers);
+			}
+
+			private maybeRepairHiddenPropertyFoldRanges(): boolean {
+				if (this.hiddenLineNumbers.length === 0) {
+					return false;
+				}
+
+				const effects: StateEffect<unknown>[] = [];
+				const folded = foldedRanges(this.view.state);
+				folded.between(0, this.view.state.doc.length, (from, to) => {
+					const startLineNumber = this.view.state.doc.lineAt(from).number;
+					if (this.hiddenLineNumberSet.has(startLineNumber)) {
+						effects.push(unfoldEffect.of({ from, to }));
+					}
+				});
+
+				if (effects.length === 0) {
+					return false;
+				}
+
+				this.view.dispatch({ effects });
+				return true;
 			}
 
 			private handleHiddenPropertyAwareEnter(event: KeyboardEvent) {
@@ -255,13 +295,41 @@ function resolveHiddenPropertyAwareEnterTarget(
 	cursor: number,
 ): HiddenPropertyAwareEnterTarget | null {
 	const doc = state.doc;
+	const structure = scanUnorderedListStructure(state, currentLine, currentLineInfo);
+	const hasDirectChild = structure.firstDirectChildFrom !== null;
+	const insertFrom = hasDirectChild ? structure.firstDirectChildFrom! : structure.parentTailEnd;
+	const insertionPrefix = hasDirectChild
+		? (structure.firstDirectChildInsertionPrefix ?? buildChildInsertionPrefix(currentLineInfo.leadingWhitespace, state))
+		: currentLineInfo.insertionPrefix;
+	const suffixText = doc.sliceString(cursor, currentLine.to);
+	const preservedTail = doc.sliceString(currentLine.to, insertFrom);
+	const beforeInsertedNewline = preservedTail.endsWith('\n') ? '' : '\n';
+	const afterInsertedNewline = insertFrom < doc.length ? '\n' : '';
+	const replaceText = `${preservedTail}${beforeInsertedNewline}${insertionPrefix}${suffixText}${afterInsertedNewline}`;
+	const selectionHead = cursor + preservedTail.length + beforeInsertedNewline.length + insertionPrefix.length;
+
+	return {
+		replaceFrom: cursor,
+		replaceTo: insertFrom,
+		replaceText,
+		selectionHead,
+	};
+}
+
+function scanUnorderedListStructure(
+	state: EditorState,
+	currentLine: Line,
+	currentLineInfo: UnorderedListLineInfo,
+): UnorderedListStructure {
+	const doc = state.doc;
 	const tabSize = state.tabSize;
 	const currentListIndentColumns = currentLineInfo.indentColumns;
 	const continuationIndentColumns = currentLineInfo.contentIndentColumns;
 
 	let fenceState: MarkdownFenceState | null = null;
-	let insertFrom = doc.length;
-	let childInsertionPrefix: string | null = null;
+	let parentTailEnd = doc.length;
+	let firstDirectChildFrom: number | null = null;
+	let firstDirectChildInsertionPrefix: string | null = null;
 
 	for (let lineNumber = currentLine.number + 1; lineNumber <= doc.lines; lineNumber++) {
 		const line = doc.line(lineNumber);
@@ -281,12 +349,13 @@ function resolveHiddenPropertyAwareEnterTarget(
 		const listLineInfo = parseUnorderedListLineInfo(lineText, tabSize);
 		if (listLineInfo) {
 			if (listLineInfo.indentColumns > currentListIndentColumns) {
-				insertFrom = line.from;
-				childInsertionPrefix = listLineInfo.insertionPrefix;
+				firstDirectChildFrom = line.from;
+				firstDirectChildInsertionPrefix = listLineInfo.insertionPrefix;
+				parentTailEnd = line.from;
 				break;
 			}
 
-			insertFrom = line.from;
+			parentTailEnd = line.from;
 			break;
 		}
 
@@ -301,26 +370,14 @@ function resolveHiddenPropertyAwareEnterTarget(
 			continue;
 		}
 
-		insertFrom = line.from;
+		parentTailEnd = line.from;
 		break;
 	}
 
-	if (childInsertionPrefix === null) {
-		childInsertionPrefix = buildChildInsertionPrefix(currentLineInfo.leadingWhitespace, state);
-	}
-
-	const suffixText = doc.sliceString(cursor, currentLine.to);
-	const preservedTail = doc.sliceString(currentLine.to, insertFrom);
-	const beforeChildNewline = preservedTail.endsWith('\n') ? '' : '\n';
-	const afterChildNewline = insertFrom < doc.length ? '\n' : '';
-	const replaceText = `${preservedTail}${beforeChildNewline}${childInsertionPrefix}${suffixText}${afterChildNewline}`;
-	const selectionHead = cursor + preservedTail.length + beforeChildNewline.length + childInsertionPrefix.length;
-
 	return {
-		replaceFrom: cursor,
-		replaceTo: insertFrom,
-		replaceText,
-		selectionHead,
+		firstDirectChildFrom,
+		firstDirectChildInsertionPrefix,
+		parentTailEnd,
 	};
 }
 
