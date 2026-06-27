@@ -1,5 +1,5 @@
 import { EditorView, WidgetType } from "@codemirror/view";
-import { createSourceBlockBackButtonElement } from "src/ui/SourceBlockBackButtonElement";
+import { createBlockReferenceActionButtonsElement } from "src/ui/BlockReferenceActionButtonsElement";
 import { replaceChildrenFromHtml } from "src/utils/html";
 
 export type BlockRenderMode = "inline" | "embed";
@@ -67,28 +67,36 @@ export class BlockReferenceWidget extends WidgetType {
         return event.type !== "mousedown";
     }
 
+    private applyReferenceDatasets(container: HTMLElement) {
+        if (!this.interaction) {
+            return;
+        }
+
+        container.dataset.blockRefFrom = String(this.interaction.from);
+        container.dataset.blockRefTo = String(this.interaction.to);
+        container.dataset.blockRefRevealPos = String(this.interaction.revealPos);
+
+        if (this.interaction.refId) {
+            container.dataset.blockRefId = this.interaction.refId;
+        }
+
+        if (this.interaction.sourceBlockId) {
+            container.dataset.blockRefSourceId = this.interaction.sourceBlockId;
+        }
+    }
+
     private createEmbedCard(doc: Document, isBlockWidget: boolean, isListCard: boolean): HTMLElement {
         const card = doc.createElement("div");
         const usesMeasuredListLayout = this.interaction?.listMarkerOffsetPx !== undefined
             && this.interaction?.listContentOffsetPx !== undefined;
         const preservesListMarker = this.interaction?.preserveListMarker === true;
         card.className = `block-reference-enhancer-widget block-reference-embed-widget markdown-rendered${isBlockWidget ? "" : " is-inline-embed"}${isListCard ? " is-list-embed-card" : ""}${usesMeasuredListLayout ? " is-measured-list-embed" : ""}${preservesListMarker ? " is-list-inline-embed" : ""}`;
+        this.applyReferenceDatasets(card);
 
         if (this.interaction) {
-            card.dataset.blockRefFrom = String(this.interaction.from);
-            card.dataset.blockRefTo = String(this.interaction.to);
-            card.dataset.blockRefRevealPos = String(this.interaction.revealPos);
             if (this.interaction.stale) {
                 card.addClass("is-stale");
                 card.setAttribute("title", "Source block missing. Showing cached content.");
-            }
-
-            if (this.interaction.refId) {
-                card.dataset.blockRefId = this.interaction.refId;
-            }
-
-            if (this.interaction.sourceBlockId) {
-                card.dataset.blockRefSourceId = this.interaction.sourceBlockId;
             }
 
             if (this.interaction.availableInlineWidthPx !== undefined) {
@@ -135,6 +143,9 @@ export class BlockReferenceWidget extends WidgetType {
 
             layout.append(marker, embed);
             card.appendChild(layout);
+            if (this.interaction?.sourceBlockId) {
+                card.appendChild(createBlockReferenceActionButtonsElement(this.interaction.sourceBlockId, doc));
+            }
             return card;
         }
 
@@ -154,6 +165,10 @@ export class BlockReferenceWidget extends WidgetType {
         } else {
             card.setText("Error: Invalid state");
             card.addClass("is-error");
+        }
+
+        if (this.interaction?.sourceBlockId) {
+            card.appendChild(createBlockReferenceActionButtonsElement(this.interaction.sourceBlockId, doc));
         }
 
         return card;
@@ -183,6 +198,7 @@ export class BlockReferenceWidget extends WidgetType {
         } else {
             container.className = "block-reference-enhancer-widget block-reference-inline-ref";
         }
+        this.applyReferenceDatasets(container);
 
         if (this.interaction?.stale) {
             container.addClass("is-stale");
@@ -203,8 +219,7 @@ export class BlockReferenceWidget extends WidgetType {
         }
 
         if (this.interaction?.sourceBlockId) {
-            container.dataset.blockRefSourceId = this.interaction.sourceBlockId;
-            container.appendChild(createSourceBlockBackButtonElement(this.interaction.sourceBlockId, doc));
+            container.appendChild(createBlockReferenceActionButtonsElement(this.interaction.sourceBlockId, doc));
         }
 
         return container;

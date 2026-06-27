@@ -1,5 +1,5 @@
 import { BlockCache, BlockReferenceLocation, ParsedMarkdownFile } from '../types';
-import { getOpeningMarkdownFenceState, isClosingMarkdownFence, type MarkdownFenceState } from '../utils/markdownFence';
+import { getOpeningMarkdownFenceState, isClosingMarkdownFence, measureIndentColumns, type MarkdownFenceState } from '../utils/markdownFence';
 
 interface BlockInProgress {
     block: BlockCache;
@@ -61,7 +61,7 @@ export class BlockParser {
 
             const blockMatch = line.match(this.BLOCK_CONTENT_REGEX);
             if (blockMatch) {
-                const indentation = blockMatch[1].length;
+                const indentation = measureIndentColumns(blockMatch[1]);
                 const rawContent = blockMatch[2];
 
                 const newBlock: BlockInProgress = {
@@ -297,7 +297,7 @@ export class BlockParser {
 
     private getLineIndentation(line: string): number {
         const match = line.match(/^(\s*)/);
-        return match ? match[1].length : 0;
+        return match ? measureIndentColumns(match[1]) : 0;
     }
 
     private findInlineCodeSpanEnd(line: string, start: number): number {

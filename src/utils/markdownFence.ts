@@ -12,7 +12,13 @@ const CLOSING_FENCE_REMAINDER_REGEX = /^(`{3,}|~{3,})[ \t]*$/;
 export function measureIndentColumns(value: string, tabSize = 4): number {
     let columns = 0;
     for (const char of value) {
-        columns += char === '\t' ? tabSize : 1;
+        if (char === '\t') {
+            const nextTabStop = tabSize - (columns % tabSize);
+            columns += nextTabStop === 0 ? tabSize : nextTabStop;
+            continue;
+        }
+
+        columns += 1;
     }
 
     return columns;

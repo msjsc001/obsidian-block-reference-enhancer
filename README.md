@@ -15,7 +15,8 @@ It is a display enhancer and renderer, and it also builds a local block index an
 > [!NOTE]
 > Plugin display name: `Block Reference Enhancer`  
 > Plugin ID and install folder: `block-reference-enhancer`  
-> The GitHub repository keeps the `obsidian-` prefix only as a repository name.
+> The GitHub repository keeps the `obsidian-` prefix only as a repository name.<br>
+> The Obsidian default theme is the baseline theme that this plugin is expected to work with correctly. Other themes are not guaranteed to render or behave correctly.
 
 ## ✨ What It Does
 
@@ -317,6 +318,7 @@ If you run into a problem:
 ## ⚠️ Known Limitations
 
 - This plugin is a UUID block reference and block embed syntax enhancer, not a Logseq replacement.
+- The Obsidian default theme is the compatibility baseline for this plugin. Other themes are not guaranteed to render or behave correctly.
 - Live Preview can still show small visual differences in very complex lists or under heavily customized themes.
 - When a source block is missing, recovery defaults to the recovery page instead of restoring the block back into its original file and line position.
 

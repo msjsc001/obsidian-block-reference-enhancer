@@ -1,14 +1,17 @@
 import { CachedMetadata, Component, Editor, EventRef, Events, ListItemCache, MarkdownFileInfo, MarkdownPostProcessorContext, MarkdownRenderChild, MarkdownRenderer, MarkdownView, Menu, Notice, Plugin, TFile } from 'obsidian';
+import { EditorView } from '@codemirror/view';
 import { IndexService } from './services/IndexService';
 import { BlockSuggest } from './editor/BlockSuggest';
 import { blockReferenceField } from './editor/BlockReferenceField';
 import { createAsyncBlockRendererPlugin } from './editor/AsyncBlockRendererPlugin';
 import { createSourceReferenceBadgePlugin } from './editor/SourceReferenceBadgePlugin';
 import { createLogseqPropertyHidePlugin } from './editor/LogseqPropertyHidePlugin';
+import { createEditorContextMenuTargetPlugin, type EditorContextMenuTarget } from './editor/EditorContextMenuTargetPlugin';
+import { BlockParser } from './services/BlockParser';
 import { BlockCache, BlockReferenceLocation, IndexBuildStats, IndexProgress, IndexStatus, LegacyPersistedBlockCacheEntry, PersistedIndexCacheV3, PersistedIndexCacheV4, ReferencePreviewContext } from './types';
+import { createBlockReferenceActionButtonsElement } from './ui/BlockReferenceActionButtonsElement';
 import { StaleBlockReviewModal } from './ui/StaleBlockReviewModal';
 import { createSourceReferenceBadgeElement } from './ui/SourceReferenceBadgeElement';
-import { createSourceBlockBackButtonElement } from './ui/SourceBlockBackButtonElement';
 import { SourceReferencePopover } from './ui/SourceReferencePopover';
 import { isHtmlElement } from './utils/dom';
 import { getOpeningMarkdownFenceState, isClosingMarkdownFence, type MarkdownFenceState } from './utils/markdownFence';
@@ -211,14 +214,23 @@ export default class BlockReferenceEnhancer extends Plugin {
 	private startupFullRebuildPending = false;
 	private sourceReferencePopover: SourceReferencePopover | null = null;
 	private persistedData: BlockReferenceEnhancerPersistedData = {};
+	private editorContextMenuTarget: EditorContextMenuTarget | null = null;
 	private hiddenLogseqPropertyMatcher: HiddenLogseqPropertyMatcher = buildHiddenLogseqPropertyMatcher(DEFAULT_HIDDEN_LOGSEQ_PROPERTY_KEYS);
 	private logseqPropertySettingsRevision = 0;
 	private readonly logseqPropertyEvents = new Events();
 
 	private static readonly SOURCE_BLOCK_PATTERN = /^\s*-\s(.+)/;
 
-	private getBackButtonHost(target: HTMLElement): HTMLElement | null {
-		const host = target.closest('.block-reference-inline-ref, .block-reference-embed');
+	setEditorContextMenuTarget(target: EditorContextMenuTarget) {
+		this.editorContextMenuTarget = target;
+	}
+
+	clearEditorContextMenuTarget() {
+		this.editorContextMenuTarget = null;
+	}
+
+	private getActionButtonHost(target: HTMLElement): HTMLElement | null {
+		const host = target.closest('.block-reference-inline-ref, .block-reference-embed, .block-reference-embed-widget');
 		return isHtmlElement(host) ? host : null;
 	}
 
@@ -304,9 +316,9 @@ export default class BlockReferenceEnhancer extends Plugin {
 				return;
 			}
 
-			const backButton = target.closest('.block-reference-back-button');
-			if (isHtmlElement(backButton)) {
-				const host = this.getBackButtonHost(backButton);
+			const actionButton = target.closest('.block-reference-back-button, .block-reference-delete-button');
+			if (isHtmlElement(actionButton)) {
+				const host = this.getActionButtonHost(actionButton);
 				if (host) {
 					this.pinBackButtonHost(host);
 				}
@@ -316,7 +328,7 @@ export default class BlockReferenceEnhancer extends Plugin {
 				return;
 			}
 
-			const backHost = this.getBackButtonHost(target);
+			const backHost = this.getActionButtonHost(target);
 			if (backHost) {
 				this.pinBackButtonHost(backHost);
 			} else {
@@ -356,6 +368,14 @@ export default class BlockReferenceEnhancer extends Plugin {
 
 			const target = event.target;
 			if (!isHtmlElement(target)) {
+				return;
+			}
+
+			const deleteButton = target.closest('.block-reference-delete-button');
+			if (isHtmlElement(deleteButton)) {
+				event.preventDefault();
+				event.stopPropagation();
+				this.deleteRenderedReferenceFromButton(deleteButton);
 				return;
 			}
 
@@ -406,7 +426,8 @@ export default class BlockReferenceEnhancer extends Plugin {
 		const asyncPlugin = createAsyncBlockRendererPlugin(this);
 		const sourceReferenceBadgePlugin = createSourceReferenceBadgePlugin(this);
 		const logseqPropertyHidePlugin = createLogseqPropertyHidePlugin(this);
-		this.registerEditorExtension([blockReferenceField, asyncPlugin, sourceReferenceBadgePlugin, logseqPropertyHidePlugin]);
+		const editorContextMenuTargetPlugin = createEditorContextMenuTargetPlugin(this);
+		this.registerEditorExtension([blockReferenceField, editorContextMenuTargetPlugin, asyncPlugin, sourceReferenceBadgePlugin, logseqPropertyHidePlugin]);
 
 		this.registerEditorSuggest(new BlockSuggest(this.app, this.indexService));
 
@@ -504,7 +525,8 @@ export default class BlockReferenceEnhancer extends Plugin {
 	}
 
 	private addEditorBlockCopyMenuItems(menu: Menu, editor: Editor, info: MarkdownView | MarkdownFileInfo) {
-		if (!this.isCurrentLineSourceBlock(editor)) {
+		const targetLine = this.resolveEditorMenuTargetLine(editor, info);
+		if (!this.isCurrentLineSourceBlock(editor, targetLine)) {
 			return;
 		}
 
@@ -514,7 +536,7 @@ export default class BlockReferenceEnhancer extends Plugin {
 				.setIcon('copy')
 				.setSection('block-reference-enhancer')
 				.onClick(() => {
-					void this.copyCurrentBlockSyntax(editor, info, 'reference');
+					void this.copyCurrentBlockSyntax(editor, info, 'reference', targetLine);
 				});
 		});
 
@@ -524,13 +546,31 @@ export default class BlockReferenceEnhancer extends Plugin {
 				.setIcon('copy')
 				.setSection('block-reference-enhancer')
 				.onClick(() => {
-					void this.copyCurrentBlockSyntax(editor, info, 'embed');
+					void this.copyCurrentBlockSyntax(editor, info, 'embed', targetLine);
 				});
 		});
 	}
 
-	private async copyCurrentBlockSyntax(editor: Editor, info: MarkdownView | MarkdownFileInfo, syntax: 'reference' | 'embed') {
-		const blockId = this.getOrCreateCurrentBlockId(editor, info);
+	private resolveEditorMenuTargetLine(editor: Editor, info: MarkdownView | MarkdownFileInfo): number {
+		const filePath = info.file?.path;
+		const target = this.editorContextMenuTarget;
+		const isRecentTarget = !!target && Date.now() - target.capturedAt < 2000;
+		if (
+			filePath
+			&& target
+			&& isRecentTarget
+			&& target.filePath === filePath
+			&& target.line >= 0
+			&& target.line < editor.lineCount()
+		) {
+			return target.line;
+		}
+
+		return editor.getCursor().line;
+	}
+
+	private async copyCurrentBlockSyntax(editor: Editor, info: MarkdownView | MarkdownFileInfo, syntax: 'reference' | 'embed', targetLine?: number) {
+		const blockId = this.getOrCreateCurrentBlockId(editor, info, targetLine);
 		if (!blockId) {
 			return;
 		}
@@ -547,9 +587,8 @@ export default class BlockReferenceEnhancer extends Plugin {
 		new Notice(syntax === 'embed' ? 'Block embed copied to clipboard!' : 'Block reference copied to clipboard!');
 	}
 
-	private isCurrentLineSourceBlock(editor: Editor): boolean {
-		const cursor = editor.getCursor();
-		const lineContent = editor.getLine(cursor.line);
+	private isCurrentLineSourceBlock(editor: Editor, targetLine = editor.getCursor().line): boolean {
+		const lineContent = editor.getLine(targetLine);
 		return BlockReferenceEnhancer.SOURCE_BLOCK_PATTERN.test(lineContent);
 	}
 
@@ -579,6 +618,10 @@ export default class BlockReferenceEnhancer extends Plugin {
 				break;
 			}
 
+			if (BlockReferenceEnhancer.SOURCE_BLOCK_PATTERN.test(lineContent)) {
+				break;
+			}
+
 			const idMatch = lineContent.match(/^\s*id::\s*([A-Za-z0-9_-]{36,})\s*$/);
 			if (idMatch) {
 				return idMatch[1];
@@ -588,12 +631,11 @@ export default class BlockReferenceEnhancer extends Plugin {
 		return null;
 	}
 
-	private getOrCreateCurrentBlockId(editor: Editor, info: MarkdownView | MarkdownFileInfo): string | null {
+	private getOrCreateCurrentBlockId(editor: Editor, info: MarkdownView | MarkdownFileInfo, targetLine = editor.getCursor().line): string | null {
 		const file = info.file;
 		if (!file) return null;
 
-		const cursor = editor.getCursor();
-		const line = cursor.line;
+		const line = targetLine;
 		const lineContent = editor.getLine(line);
 
 		const blockMatch = lineContent.match(BlockReferenceEnhancer.SOURCE_BLOCK_PATTERN);
@@ -604,23 +646,13 @@ export default class BlockReferenceEnhancer extends Plugin {
 
 		let existingBlock = this.indexService.findBlockByFileAndLine(file.path, line);
 		if (existingBlock) {
+			this.upsertEditorBlockIntoIndex(editor, file, line, existingBlock.id);
 			return existingBlock.id;
 		}
 
 		const existingBlockId = this.findExistingBlockIdInEditor(editor, line);
 		if (existingBlockId) {
-			if (!this.indexService.getBlock(existingBlockId)) {
-				this.indexService.addBlock(existingBlockId, {
-					filePath: file.path,
-					rawContent: blockMatch[1],
-					childrenMarkdown: '',
-					startLine: line,
-					endLine: line,
-					childrenIDs: [],
-					sourceUpdatedAt: file.stat.mtime,
-				});
-			}
-
+			this.upsertEditorBlockIntoIndex(editor, file, line, existingBlockId);
 			return existingBlockId;
 		}
 
@@ -631,6 +663,32 @@ export default class BlockReferenceEnhancer extends Plugin {
 
 		editor.replaceRange(idLine, { line: line, ch: lineContent.length });
 
+		this.upsertEditorBlockIntoIndex(editor, file, line, blockId);
+
+		return blockId;
+	}
+
+	private upsertEditorBlockIntoIndex(editor: Editor, file: TFile, line: number, blockId: string) {
+		const parsedBlock = new BlockParser().parse(file.path, editor.getValue()).blocks.get(blockId);
+		if (parsedBlock) {
+			this.indexService.addBlock(blockId, {
+				filePath: parsedBlock.filePath,
+				rawContent: parsedBlock.rawContent,
+				childrenMarkdown: parsedBlock.childrenMarkdown,
+				startLine: parsedBlock.startLine,
+				endLine: parsedBlock.endLine,
+				childrenIDs: parsedBlock.childrenIDs,
+				sourceUpdatedAt: Date.now(),
+			});
+			return;
+		}
+
+		const lineContent = editor.getLine(line);
+		const blockMatch = lineContent.match(BlockReferenceEnhancer.SOURCE_BLOCK_PATTERN);
+		if (!blockMatch) {
+			return;
+		}
+
 		this.indexService.addBlock(blockId, {
 			filePath: file.path,
 			rawContent: blockMatch[1],
@@ -638,10 +696,8 @@ export default class BlockReferenceEnhancer extends Plugin {
 			startLine: line,
 			endLine: line,
 			childrenIDs: [],
-			sourceUpdatedAt: file.stat.mtime,
+			sourceUpdatedAt: Date.now(),
 		});
-
-		return blockId;
 	}
 
 	private async openSourceBlockLocation(block: BlockCache) {
@@ -679,6 +735,44 @@ export default class BlockReferenceEnhancer extends Plugin {
 		}
 
 		menu.showAtMouseEvent(event);
+	}
+
+	private resolveRenderedReferenceEditorView(target: HTMLElement): EditorView | null {
+		const editorRoot = target.closest('.cm-editor');
+		if (!isHtmlElement(editorRoot)) {
+			return null;
+		}
+
+		return EditorView.findFromDOM(editorRoot);
+	}
+
+	private deleteRenderedReferenceFromButton(button: HTMLElement) {
+		const host = button.closest('[data-block-ref-from][data-block-ref-to]');
+		if (!isHtmlElement(host)) {
+			new Notice('Unable to delete this rendered block syntax here.');
+			return;
+		}
+
+		const from = Number(host.dataset.blockRefFrom);
+		const to = Number(host.dataset.blockRefTo);
+		if (!Number.isFinite(from) || !Number.isFinite(to) || to < from) {
+			new Notice('Unable to resolve the rendered block syntax range.');
+			return;
+		}
+
+		const editorView = this.resolveRenderedReferenceEditorView(host);
+		if (!editorView) {
+			new Notice('Delete is only available in Live Preview editing.');
+			return;
+		}
+
+		this.clearPinnedBackButtons();
+		editorView.focus();
+		editorView.dispatch({
+			changes: { from, to, insert: '' },
+			selection: { anchor: from },
+			scrollIntoView: true,
+		});
 	}
 
 	getInlineReferenceText(uuid: string): string | null {
@@ -728,7 +822,7 @@ export default class BlockReferenceEnhancer extends Plugin {
 
 	async buildEmbedHtml(uuid: string, sourcePath: string, component: Component): Promise<string> {
 		const host = activeDocument.createElement('div');
-		await this.populateEmbedContainer(host, uuid, sourcePath, component, new Set<string>());
+		await this.populateEmbedContainer(host, uuid, sourcePath, component, new Set<string>(), false);
 		return serializeChildrenToHtml(host);
 	}
 
@@ -1055,7 +1149,7 @@ export default class BlockReferenceEnhancer extends Plugin {
 		text.addClass('block-reference-inline-ref-text');
 		text.setText(summary);
 
-		inlineRef.append(text, createSourceBlockBackButtonElement(uuid, ownerDocument));
+		inlineRef.append(text, createBlockReferenceActionButtonsElement(uuid, ownerDocument));
 		return inlineRef;
 	}
 
@@ -1105,19 +1199,23 @@ export default class BlockReferenceEnhancer extends Plugin {
 
 	private attachSourceBackButton(container: HTMLElement, uuid: string) {
 		const existingButton = Array.from(container.children).find((child) => {
-			return child.classList.contains('block-reference-back-button');
+			return child.classList.contains('block-reference-action-buttons')
+				|| child.classList.contains('block-reference-back-button')
+				|| child.classList.contains('block-reference-delete-button');
 		});
 		if (existingButton) {
 			existingButton.remove();
 		}
 
 		container.dataset.blockRefSourceId = uuid;
-		container.appendChild(createSourceBlockBackButtonElement(uuid, container));
+		container.appendChild(createBlockReferenceActionButtonsElement(uuid, container));
 	}
 
-	private finalizeEmbedContainer(container: HTMLElement, uuid: string, contentNodes: Node[]) {
+	private finalizeEmbedContainer(container: HTMLElement, uuid: string, contentNodes: Node[], includeBackButton: boolean) {
 		container.replaceChildren(...contentNodes);
-		this.attachSourceBackButton(container, uuid);
+		if (includeBackButton) {
+			this.attachSourceBackButton(container, uuid);
+		}
 		container.removeClass('is-loading');
 		container.style.removeProperty('--block-reference-embed-placeholder-height');
 	}
@@ -1157,7 +1255,8 @@ export default class BlockReferenceEnhancer extends Plugin {
 		uuid: string,
 		sourcePath: string,
 		component: Component,
-		visitedEmbeds: Set<string>
+		visitedEmbeds: Set<string>,
+		includeBackButton = true,
 	) {
 		this.prepareEmbedContainer(container, uuid);
 
@@ -1166,7 +1265,9 @@ export default class BlockReferenceEnhancer extends Plugin {
 			container.removeClass('is-loading');
 			container.addClass('block-reference-enhancer-error');
 			container.setText('Cyclic embed');
-			this.attachSourceBackButton(container, uuid);
+			if (includeBackButton) {
+				this.attachSourceBackButton(container, uuid);
+			}
 			return;
 		}
 
@@ -1176,7 +1277,9 @@ export default class BlockReferenceEnhancer extends Plugin {
 			container.removeClass('is-loading');
 			container.addClass('block-reference-enhancer-error');
 			container.setText('Missing block');
-			this.attachSourceBackButton(container, uuid);
+			if (includeBackButton) {
+				this.attachSourceBackButton(container, uuid);
+			}
 			return;
 		}
 
@@ -1205,7 +1308,7 @@ export default class BlockReferenceEnhancer extends Plugin {
 			contentNodes.push(childrenContainer);
 		}
 
-		this.finalizeEmbedContainer(container, uuid, contentNodes);
+		this.finalizeEmbedContainer(container, uuid, contentNodes, includeBackButton);
 	}
 
 	async processRenderedReferences(
@@ -1871,14 +1974,35 @@ export default class BlockReferenceEnhancer extends Plugin {
 
 	private attachReadingModeSourceBadge(listItem: HTMLLIElement, block: BlockCache, count: number) {
 		const blockId = block.id;
-		const existing = listItem.querySelector(`.block-reference-source-badge[data-block-ref-source-id="${CSS.escape(blockId)}"]`);
-		if (isHtmlElement(existing)) {
-			existing.dataset.blockRefSourceCount = String(count);
-			existing.dataset.blockRefSourceFilePath = block.filePath;
-			existing.dataset.blockRefSourceStartLine = String(block.startLine);
-			existing.setAttribute('aria-label', `Referenced ${count} times`);
-			existing.setAttribute('title', `${count} references`);
-			existing.setText(String(count));
+		const contentHost = this.getReadingModeBadgeContentHost(listItem);
+		const badgeParent = contentHost ?? listItem;
+		let reusableBadge: HTMLElement | null = null;
+		for (const child of Array.from(badgeParent.children)) {
+			if (!child.classList.contains('block-reference-source-badge-anchor')) {
+				continue;
+			}
+
+			const badge = child.querySelector('.block-reference-source-badge');
+			if (!isHtmlElement(badge)) {
+				child.remove();
+				continue;
+			}
+
+			if (!reusableBadge && badge.dataset.blockRefSourceId === blockId) {
+				reusableBadge = badge;
+				continue;
+			}
+
+			child.remove();
+		}
+
+		if (reusableBadge) {
+			reusableBadge.dataset.blockRefSourceCount = String(count);
+			reusableBadge.dataset.blockRefSourceFilePath = block.filePath;
+			reusableBadge.dataset.blockRefSourceStartLine = String(block.startLine);
+			reusableBadge.setAttribute('aria-label', `Referenced ${count} times`);
+			reusableBadge.setAttribute('title', `${count} references`);
+			reusableBadge.setText(String(count));
 			return;
 		}
 
@@ -1886,7 +2010,6 @@ export default class BlockReferenceEnhancer extends Plugin {
 		anchor.className = 'block-reference-source-badge-anchor';
 		anchor.appendChild(createSourceReferenceBadgeElement(blockId, count, block.filePath, block.startLine, listItem));
 
-		const contentHost = this.getReadingModeBadgeContentHost(listItem);
 		if (contentHost) {
 			contentHost.appendChild(anchor);
 			return;

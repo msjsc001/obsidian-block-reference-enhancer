@@ -8,6 +8,7 @@ import {
 } from "./BlockReferenceField";
 import { BlockRenderMode } from "./BlockReferenceWidget";
 import BlockReferenceEnhancer from "src/main";
+import { createBlockReferenceActionButtonsElement } from "src/ui/BlockReferenceActionButtonsElement";
 import { isHtmlElement } from "src/utils/dom";
 import { replaceChildrenFromHtml } from "src/utils/html";
 import { getOpeningMarkdownFenceState, isClosingMarkdownFence, type MarkdownFenceState } from "src/utils/markdownFence";
@@ -669,6 +670,7 @@ export function createAsyncBlockRendererPlugin(plugin: BlockReferenceEnhancer) {
                 card.dataset.blockRefTo = String(target.to);
                 card.dataset.blockRefRevealPos = String(target.revealPos ?? target.from);
                 card.dataset.blockRefId = getTargetRefId(target);
+                card.dataset.blockRefSourceId = target.uuid;
                 const layout = this.getViewDocument().createElement("div");
                 layout.className = "block-reference-live-preview-embed-layout is-list-card";
 
@@ -678,6 +680,7 @@ export function createAsyncBlockRendererPlugin(plugin: BlockReferenceEnhancer) {
 
                 layout.appendChild(embed);
                 card.appendChild(layout);
+                card.appendChild(createBlockReferenceActionButtonsElement(target.uuid, card));
                 this.ensureOverlayRoot().appendChild(card);
                 return card;
             }
@@ -781,18 +784,16 @@ export function createAsyncBlockRendererPlugin(plugin: BlockReferenceEnhancer) {
             }
 
             private shouldRevealSource(target: BlockRenderTarget): boolean {
-                if (target.mode === "inline") {
-                    const revealFrom = target.revealFrom ?? target.from;
-                    const revealTo = target.revealTo ?? target.to;
-                    return this.selectionOverlapsRange(revealFrom, revealTo);
+                const revealFrom = target.revealFrom ?? target.from;
+                const revealTo = target.revealTo ?? target.to;
+                if (this.selectionOverlapsRange(revealFrom, revealTo)) {
+                    return true;
                 }
 
-                if (this.revealedEmbedPos === null) {
+                if (target.mode === "inline" || this.revealedEmbedPos === null) {
                     return false;
                 }
 
-                const revealFrom = target.revealFrom ?? target.from;
-                const revealTo = target.revealTo ?? target.to;
                 return this.revealedEmbedPos >= revealFrom && this.revealedEmbedPos <= revealTo;
             }
 

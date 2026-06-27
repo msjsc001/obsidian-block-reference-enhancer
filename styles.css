@@ -9,6 +9,10 @@
     overflow-anchor: none;
 }
 
+.block-reference-embed-widget {
+    position: relative;
+}
+
 .block-reference-embed.is-loading {
     min-height: var(--block-reference-embed-placeholder-height, 72px);
 }
@@ -45,6 +49,44 @@
 .block-reference-inline-ref-text {
     overflow-wrap: anywhere;
     word-break: break-word;
+}
+
+.block-reference-action-buttons {
+    position: absolute;
+    top: -0.7em;
+    right: -0.2em;
+    z-index: 2;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.28em;
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(-2px);
+    transition: opacity 120ms ease, transform 120ms ease;
+}
+
+.block-reference-embed-widget > .block-reference-action-buttons {
+    top: 0.5em;
+    right: 0.5em;
+}
+
+.block-reference-embed > .block-reference-action-buttons {
+    top: 0.5em;
+    right: 0.5em;
+}
+
+.block-reference-inline-ref:hover > .block-reference-action-buttons,
+.block-reference-inline-ref:focus-within > .block-reference-action-buttons,
+.block-reference-inline-ref.is-back-pinned > .block-reference-action-buttons,
+.block-reference-embed:hover > .block-reference-action-buttons,
+.block-reference-embed:focus-within > .block-reference-action-buttons,
+.block-reference-embed.is-back-pinned > .block-reference-action-buttons,
+.block-reference-embed-widget:hover > .block-reference-action-buttons,
+.block-reference-embed-widget:focus-within > .block-reference-action-buttons,
+.block-reference-embed-widget.is-back-pinned > .block-reference-action-buttons {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translateY(0);
 }
 
 .block-reference-back-button {
@@ -92,6 +134,65 @@
 
 .block-reference-back-button:hover,
 .block-reference-back-button:focus-visible {
+    background-color: var(--background-modifier-hover);
+    color: var(--text-normal);
+}
+
+.block-reference-action-buttons > .block-reference-back-button,
+.block-reference-action-buttons > .block-reference-delete-button {
+    position: static;
+    z-index: auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 2.7em;
+    height: 1.7em;
+    padding: 0 0.5em;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 999px;
+    background-color: var(--background-primary);
+    color: var(--text-muted);
+    font-size: 0.68em;
+    font-weight: 600;
+    line-height: 1;
+    cursor: pointer;
+    box-sizing: border-box;
+    box-shadow: 0 8px 18px rgba(0, 0, 0, 0.16);
+    opacity: 1;
+    pointer-events: auto;
+    transform: none;
+    transition: background-color 120ms ease, color 120ms ease;
+}
+
+.block-reference-delete-button {
+    position: absolute;
+    top: -0.7em;
+    right: 2.8em;
+    z-index: 2;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 3.2em;
+    height: 1.7em;
+    padding: 0 0.55em;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 999px;
+    background-color: var(--background-primary);
+    color: var(--text-muted);
+    font-size: 0.68em;
+    font-weight: 600;
+    line-height: 1;
+    cursor: pointer;
+    box-sizing: border-box;
+    box-shadow: 0 8px 18px rgba(0, 0, 0, 0.16);
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(-2px);
+    transition: opacity 120ms ease, transform 120ms ease, background-color 120ms ease, color 120ms ease;
+}
+
+.block-reference-delete-button:hover,
+.block-reference-delete-button:focus-visible {
     background-color: var(--background-modifier-hover);
     color: var(--text-normal);
 }

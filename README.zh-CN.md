@@ -15,7 +15,8 @@ English documentation is available in [README.md](./README.md).
 > [!NOTE]
 > 插件显示名：`Block Reference Enhancer`  
 > 插件 ID 和安装文件夹名：`block-reference-enhancer`  
-> GitHub 仓库保留 `obsidian-` 前缀，仅用于仓库命名，不是插件 ID。
+> GitHub 仓库保留 `obsidian-` 前缀，仅用于仓库命名，不是插件 ID。<br>
+> Obsidian 默认主题是这个插件保证正常运行和显示的基准主题，其他主题不保证能正常显示或正常交互。
 
 ## ✨ 这个插件能做什么
 
@@ -321,6 +322,7 @@ Obsidian 打开命令面板快捷键：
 ## ⚠️ 已知情况
 
 - 这个插件是 UUID 块引用与块嵌入语法增强器，不是 Logseq 替代品
+- Obsidian 默认主题是这个插件的兼容性基准主题，其他主题不保证能正常显示或正常交互
 - 在非常复杂的列表结构或高度定制主题下，Live Preview 仍可能有少量视觉差异
 - 源块丢失时恢复策略默认写入恢复页，不会自动按原文件和原行号插回去
 

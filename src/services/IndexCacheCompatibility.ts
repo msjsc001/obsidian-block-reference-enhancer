@@ -1,7 +1,7 @@
 import { PersistedIndexCacheV4 } from '../types';
 
 export const INDEX_CACHE_SCHEMA_VERSION = 4;
-export const INDEX_CACHE_PARSER_REVISION = 1;
+export const INDEX_CACHE_PARSER_REVISION = 2;
 
 export type IndexCacheCompatibilityState = 'missing' | 'current' | 'invalidated';
 

@@ -163,6 +163,7 @@ export function createSourceReferenceBadgePlugin(plugin: BlockReferenceEnhancer)
                     String(this.view.state.doc.length),
                     visibleRanges.map((range) => `${range.fromLine}-${range.toLine}`).join('|'),
                 ];
+                const seenLineNumbers = new Set<number>();
 
                 const builder = new RangeSetBuilder<Decoration>();
 
@@ -176,6 +177,11 @@ export function createSourceReferenceBadgePlugin(plugin: BlockReferenceEnhancer)
                     if (!isLineVisible(lineNumber, visibleRanges) || lineNumber > this.view.state.doc.lines) {
                         continue;
                     }
+
+                    if (seenLineNumbers.has(lineNumber)) {
+                        continue;
+                    }
+                    seenLineNumbers.add(lineNumber);
 
                     const line = this.view.state.doc.line(lineNumber);
                     fingerprintParts.push(`${id}:${lineNumber}:${count}`);

@@ -213,14 +213,14 @@ export class IndexService extends Events {
     }
 
     public getBlocksForFile(filePath: string): SourceBlockRecord[] {
-        const blocks = this.sourceBlocksByFile.get(filePath) ?? [];
+        const blocks = this.dedupeSourceBlocks(this.sourceBlocksByFile.get(filePath) ?? []);
         return blocks
             .map((block) => ({ id: block.id, block }))
             .sort((left, right) => left.block.startLine - right.block.startLine || left.id.localeCompare(right.id));
     }
 
     public getActiveSourceBlocks(id: string): SourceBlockRecord[] {
-        const blocks = this.activeSourceBlocksById.get(id) ?? [];
+        const blocks = this.dedupeSourceBlocks(this.activeSourceBlocksById.get(id) ?? []);
         return blocks
             .map((block) => ({ id: block.id, block }))
             .sort((left, right) => this.compareSourceBlocksByPriority(left.block, right.block));
@@ -306,7 +306,7 @@ export class IndexService extends Events {
     }
 
     public findBlockByFileAndLine(filePath: string, line: number): { id: string, block: BlockCache } | null {
-        const blocks = this.sourceBlocksByFile.get(filePath) ?? [];
+        const blocks = this.dedupeSourceBlocks(this.sourceBlocksByFile.get(filePath) ?? []);
         for (const block of blocks) {
             if (block.startLine === line) {
                 return { id: block.id, block };
@@ -734,15 +734,14 @@ export class IndexService extends Events {
             this.refsById = new Map(
                 Object.entries(currentCache.refsById).map(([id, references]) => [id, references.map((reference) => ({ ...reference }))])
             );
-            this.sourceBlocksByFile = new Map(
-                Object.entries(currentCache.sourceBlocksByFile).map(([path, blocks]) => {
-                    const fallbackMeta = this.fileMetaByPath.get(path);
-                    return [
-                        path,
-                        blocks.map((block) => this.normalizeLoadedBlock(block.id, block, fallbackMeta?.mtime)),
-                    ];
-                })
-            );
+            this.sourceBlocksByFile = new Map();
+            for (const [path, blocks] of Object.entries(currentCache.sourceBlocksByFile)) {
+                const fallbackMeta = this.fileMetaByPath.get(path);
+                for (const block of blocks) {
+                    const normalizedBlock = this.normalizeLoadedBlock(block.id, block, fallbackMeta?.mtime);
+                    this.upsertSourceBlockForFile(path, normalizedBlock, this.sourceBlocksByFile);
+                }
+            }
             this.rebuildActiveSourceBlocksById();
             this.notifyIndexUpdated();
             return 'loaded';
@@ -882,11 +881,24 @@ export class IndexService extends Events {
             || (left.endLine ?? left.startLine) - (right.endLine ?? right.startLine);
     }
 
+    private dedupeSourceBlocks(blocks: readonly BlockCache[]): BlockCache[] {
+        const deduped = new Map<string, BlockCache>();
+
+        for (const block of blocks) {
+            const key = `${block.id}\u0000${block.filePath}\u0000${block.startLine}`;
+            const existing = deduped.get(key);
+            if (!existing || this.compareSourceBlocksByPriority(block, existing) < 0) {
+                deduped.set(key, block);
+            }
+        }
+
+        return [...deduped.values()];
+    }
+
     private isSameSourceBlock(left: BlockCache, right: BlockCache): boolean {
         return left.id === right.id
             && left.filePath === right.filePath
-            && left.startLine === right.startLine
-            && (left.endLine ?? left.startLine) === (right.endLine ?? right.startLine);
+            && left.startLine === right.startLine;
     }
 
     private async saveIndexToCache() {
