@@ -23,13 +23,12 @@ export function createEditorContextMenuTargetPlugin(plugin: BlockReferenceEnhanc
 						return false;
 					}
 
-					const position = view.posAtCoords({ x: event.clientX, y: event.clientY });
-					if (position === null) {
+					const line = resolveContextMenuLineFromView(view, event);
+					if (line === null) {
 						plugin.clearEditorContextMenuTarget();
 						return false;
 					}
 
-					const line = view.state.doc.lineAt(position).number - 1;
 					plugin.setEditorContextMenuTarget({
 						filePath,
 						line,
@@ -40,4 +39,54 @@ export function createEditorContextMenuTargetPlugin(plugin: BlockReferenceEnhanc
 			},
 		},
 	);
+}
+
+function resolveContextMenuLineFromView(view: EditorView, event: MouseEvent): number | null {
+	const documentLineCount = view.state.doc.lines;
+
+	try {
+		const block = view.lineBlockAtHeight(event.clientY - view.documentTop);
+		const line = view.state.doc.lineAt(block.from).number - 1;
+		if (line >= 0 && line < documentLineCount) {
+			return line;
+		}
+	} catch {
+		// Fall through to the next strategy.
+	}
+
+	try {
+		const position = view.posAtCoords({ x: event.clientX, y: event.clientY }, false);
+		if (typeof position === 'number') {
+			const line = view.state.doc.lineAt(position).number - 1;
+			if (line >= 0 && line < documentLineCount) {
+				return line;
+			}
+		}
+	} catch {
+		// Fall through to the final DOM-based strategy.
+	}
+
+	try {
+		const target = event.target;
+		if (!(target instanceof Node) || !view.contentDOM.contains(target)) {
+			return null;
+		}
+
+		const lineElement = target instanceof Element
+			? target.closest('.cm-line')
+			: target.parentElement?.closest('.cm-line');
+		if (!(lineElement instanceof HTMLElement)) {
+			return null;
+		}
+
+		const position = view.posAtDOM(lineElement, 0);
+		const line = view.state.doc.lineAt(position).number - 1;
+		if (line >= 0 && line < documentLineCount) {
+			return line;
+		}
+	} catch {
+		// Ignore and return null below.
+	}
+
+	return null;
 }

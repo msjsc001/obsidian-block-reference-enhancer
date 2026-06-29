@@ -18,10 +18,13 @@ import { getOpeningMarkdownFenceState, isClosingMarkdownFence, type MarkdownFenc
 import { serializeChildrenToHtml } from './utils/html';
 import { BlockReferenceEnhancerSettingTab } from './ui/BlockReferenceEnhancerSettingTab';
 import { DEFAULT_HIDDEN_LOGSEQ_PROPERTY_KEYS, HiddenLogseqPropertyMatcher, buildHiddenLogseqPropertyMatcher, isHiddenLogseqPropertyKey, isHiddenLogseqPropertyLineText, parseHiddenLogseqPropertyLine } from './services/LogseqPropertyMatcher';
+import { canPasteClipboardAsOutline, pasteClipboardAsOutline } from './services/OutlinePasteController';
+import { canCopyCurrentLevelAndChildren, copyCurrentLevelAndChildren } from './services/OutlineSubtreeCopyController';
 
 export interface BlockReferenceEnhancerSettings {
 	hideLogseqProperties: boolean;
 	hiddenLogseqPropertyKeys: string;
+	enablePasteClipboardAsOutline: boolean;
 }
 
 interface BlockReferenceEnhancerPersistedData {
@@ -32,6 +35,7 @@ interface BlockReferenceEnhancerPersistedData {
 const DEFAULT_SETTINGS: BlockReferenceEnhancerSettings = {
 	hideLogseqProperties: true,
 	hiddenLogseqPropertyKeys: DEFAULT_HIDDEN_LOGSEQ_PROPERTY_KEYS,
+	enablePasteClipboardAsOutline: false,
 };
 
 const MAX_INLINE_SUMMARY_LENGTH = 60;
@@ -527,6 +531,8 @@ export default class BlockReferenceEnhancer extends Plugin {
 	private addEditorBlockCopyMenuItems(menu: Menu, editor: Editor, info: MarkdownView | MarkdownFileInfo) {
 		const targetLine = this.resolveEditorMenuTargetLine(editor, info);
 		if (!this.isCurrentLineSourceBlock(editor, targetLine)) {
+			this.addCopyCurrentLevelAndChildrenMenuItem(menu, editor, targetLine);
+			this.addPasteClipboardAsOutlineMenuItem(menu, editor, info, targetLine);
 			return;
 		}
 
@@ -547,6 +553,41 @@ export default class BlockReferenceEnhancer extends Plugin {
 				.setSection('block-reference-enhancer')
 				.onClick(() => {
 					void this.copyCurrentBlockSyntax(editor, info, 'embed', targetLine);
+				});
+		});
+
+		this.addCopyCurrentLevelAndChildrenMenuItem(menu, editor, targetLine);
+		this.addPasteClipboardAsOutlineMenuItem(menu, editor, info, targetLine);
+	}
+
+	private addCopyCurrentLevelAndChildrenMenuItem(menu: Menu, editor: Editor, targetLine: number) {
+		if (!canCopyCurrentLevelAndChildren(editor, targetLine)) {
+			return;
+		}
+
+		menu.addItem((item) => {
+			item
+				.setTitle('Copy current level and children')
+				.setIcon('copy')
+				.setSection('block-reference-enhancer')
+				.onClick(() => {
+					void copyCurrentLevelAndChildren(editor, targetLine);
+				});
+		});
+	}
+
+	private addPasteClipboardAsOutlineMenuItem(menu: Menu, editor: Editor, info: MarkdownView | MarkdownFileInfo, targetLine: number) {
+		if (!this.settings.enablePasteClipboardAsOutline || !canPasteClipboardAsOutline(editor, targetLine)) {
+			return;
+		}
+
+		menu.addItem((item) => {
+			item
+				.setTitle('Paste clipboard as outline')
+				.setIcon('list-tree')
+				.setSection('block-reference-enhancer')
+				.onClick(() => {
+					void pasteClipboardAsOutline(editor, info, targetLine);
 				});
 		});
 	}

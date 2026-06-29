@@ -68,6 +68,22 @@ export class BlockReferenceEnhancerSettingTab extends PluginSettingTab {
 					});
 				button.setDisabled(!this.plugin.settings.hideLogseqProperties);
 			});
+
+		new Setting(containerEl)
+			.setName('Experimental')
+			.setHeading();
+
+		new Setting(containerEl)
+			.setName('Convert pasted content to outline')
+			.setDesc('Adds right-click menu actions on unordered-list blocks, including empty ones. It can paste clipboard HTML or text as child outline blocks without changing normal paste behavior.')
+			.addToggle((toggle) => {
+				toggle
+					.setValue(this.plugin.settings.enablePasteClipboardAsOutline)
+					.onChange(async (value) => {
+						this.plugin.settings.enablePasteClipboardAsOutline = value;
+						await this.plugin.saveSettings();
+					});
+			});
 	}
 
 	private scheduleSave() {

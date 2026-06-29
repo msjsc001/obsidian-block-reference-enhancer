@@ -31,6 +31,7 @@ You get:
 - Block autocomplete when typing `((`
 - Commands and editor context menu actions to copy the current block reference or block embed
 - Hidden Logseq-style outline property lines such as `id::`, `collapsed::`, and `hl-*::`
+- Experimental right-click outline paste for unordered-list blocks
 - Saved source-block edits automatically refresh existing references and embeds
 - A local cache and block index for large vaults
 
@@ -196,6 +197,28 @@ When this option is enabled, pressing `Enter` on a non-empty outline block in Li
 - If the current block does not have direct child list items yet, a new same-level sibling block is created.
 
 In both cases, hidden property lines and continuation lines stay attached to the original parent block instead of being migrated into the new block.
+
+## 🧪 Experimental Outline Paste
+
+The plugin also includes an experimental setting:
+- `Settings -> Community plugins -> Block Reference Enhancer -> Experimental -> Convert pasted content to outline`
+
+It is off by default.
+
+When enabled, any unordered-list block in the editor, including empty list items, gets right-click actions:
+- `Paste clipboard as outline`
+- `Copy current level and children`
+
+Behavior:
+- It only runs when you explicitly click that menu item
+- It only works on unordered-list blocks
+- Empty unordered-list items such as `-` or `- ` are also supported
+- Normal `Ctrl/Cmd + V` paste is not intercepted or modified
+- HTML and plain text are converted into child outline blocks when the structure is reliable
+- Structured web / ChatGPT content is reconstructed more carefully when a paragraph introduces a following list cluster
+- Generated child outline lists use `Tab` indentation by default
+- `Copy current level and children` copies the current level and its full subtree as raw Markdown text
+- Large or unreliable clipboard content is simplified or rejected instead of freezing the editor
 
 ## 📦 First Launch and Indexing
 
