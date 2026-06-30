@@ -95,6 +95,8 @@ English documentation is available in [README.md](./README.md).
 
 鼠标悬浮、聚焦或点击到渲染后的引用上时，会出现并保持显示一个小的 `Back` 按钮，用来跳回源块。
 
+当光标离开这个块引用后，它也会在短时间内自动恢复为渲染状态。
+
 ### 块嵌入
 
 `{{embed ((uuid))}}` 会显示目标块本身和它的子级内容。

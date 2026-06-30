@@ -1,5 +1,5 @@
 import { Component, EventRef, editorInfoField } from "obsidian";
-import { EditorSelection } from "@codemirror/state";
+import { type ChangeDesc, EditorSelection } from "@codemirror/state";
 import { EditorView, ViewPlugin, ViewUpdate } from "@codemirror/view";
 import {
     addLoadingWidgetEffect,
@@ -72,6 +72,11 @@ interface VisibleWidgetState {
     signature: string;
 }
 
+interface RevealedInlineReferenceState {
+    from: number;
+    to: number;
+}
+
 interface VisibleScanRange {
     from: number;
     to: number;
@@ -108,6 +113,10 @@ function buildRenderSignature(target: BlockRenderTarget): string {
 
 function getTargetRefId(target: BlockRenderTarget): string {
     return target.refId ?? `${target.mode}:${target.from}:${target.to}`;
+}
+
+function buildInlineTargetRefId(from: number, to: number): string {
+    return `inline:${from}:${to}`;
 }
 
 function findInlineCodeSpanEnd(line: string, start: number): number {
@@ -253,6 +262,7 @@ export function createAsyncBlockRendererPlugin(plugin: BlockReferenceEnhancer) {
             private component: Component;
             private runningRenders: Map<number, RunningRenderTask> = new Map();
             private revealedEmbedPos: number | null = null;
+            private revealedInlineReferences: Map<string, RevealedInlineReferenceState> = new Map();
             private inlineEmbedWidthCache: Map<string, InlineEmbedWidthGeometry> = new Map();
             private listEmbedLayoutCache: Map<string, ListEmbedLayout> = new Map();
             private overlayRoot: HTMLElement | null = null;
@@ -286,8 +296,13 @@ export function createAsyncBlockRendererPlugin(plugin: BlockReferenceEnhancer) {
                     this.revealedEmbedPos = update.changes.mapPos(this.revealedEmbedPos, -1);
                 }
 
+                if (update.docChanged) {
+                    this.mapRevealedInlineReferences(update.changes);
+                }
+
                 if (update.focusChanged && !this.view.hasFocus) {
                     this.revealedEmbedPos = null;
+                    this.revealedInlineReferences.clear();
                 }
 
                 if (update.docChanged) {
@@ -310,7 +325,11 @@ export function createAsyncBlockRendererPlugin(plugin: BlockReferenceEnhancer) {
                     return;
                 }
 
-                if (update.selectionSet && (this.revealedEmbedPos !== null || this.selectionTouchesRenderedTarget())) {
+                if (update.selectionSet && (
+                    this.revealedEmbedPos !== null
+                    || this.revealedInlineReferences.size > 0
+                    || this.selectionTouchesRenderedTarget()
+                )) {
                     this.scheduleScan(LIVE_PREVIEW_VIEWPORT_SCAN_DEBOUNCE_MS);
                 }
             }
@@ -425,6 +444,28 @@ export function createAsyncBlockRendererPlugin(plugin: BlockReferenceEnhancer) {
 
                     return false;
                 });
+            }
+
+            private mapRevealedInlineReferences(changes: ChangeDesc) {
+                if (this.revealedInlineReferences.size === 0) {
+                    return;
+                }
+
+                const nextRevealedInlineReferences = new Map<string, RevealedInlineReferenceState>();
+                for (const state of this.revealedInlineReferences.values()) {
+                    const nextFrom = changes.mapPos(state.from, -1);
+                    const nextTo = changes.mapPos(state.to, 1);
+                    if (nextTo <= nextFrom) {
+                        continue;
+                    }
+
+                    nextRevealedInlineReferences.set(buildInlineTargetRefId(nextFrom, nextTo), {
+                        from: nextFrom,
+                        to: nextTo,
+                    });
+                }
+
+                this.revealedInlineReferences = nextRevealedInlineReferences;
             }
 
             private estimateEmbedPlaceholderHeight(uuid: string): number {
@@ -849,12 +890,16 @@ export function createAsyncBlockRendererPlugin(plugin: BlockReferenceEnhancer) {
                 const selectionFingerprint = this.view.state.selection.ranges
                     .map((range) => `${range.from}:${range.to}`)
                     .join("|");
+                const revealedInlineFingerprint = Array.from(this.revealedInlineReferences.keys())
+                    .sort()
+                    .join("|");
                 const contentWidth = Math.round(this.view.contentDOM.getBoundingClientRect().width);
                 const scanFingerprint = [
                     this.documentScanVersion,
                     visibleScanRanges.map((range) => `${range.from}-${range.to}`).join("|"),
                     selectionFingerprint,
                     this.revealedEmbedPos ?? -1,
+                    revealedInlineFingerprint,
                     this.view.hasFocus ? 1 : 0,
                     contentWidth,
                     plugin.indexService.getIndexRevision(),
@@ -874,12 +919,24 @@ export function createAsyncBlockRendererPlugin(plugin: BlockReferenceEnhancer) {
                         indexRevision,
                     }));
                 const activeTargets = new Map<number, BlockRenderTarget>();
+                const nextRevealedInlineReferences = new Map<string, RevealedInlineReferenceState>();
 
                 for (const target of targets) {
-                    if (!this.shouldRevealSource(target)) {
-                        activeTargets.set(target.from, target);
+                    const revealSource = this.shouldRevealSource(target);
+                    if (revealSource) {
+                        if (target.mode === "inline") {
+                            nextRevealedInlineReferences.set(getTargetRefId(target), {
+                                from: target.from,
+                                to: target.to,
+                            });
+                        }
+                        continue;
                     }
+
+                    activeTargets.set(target.from, target);
                 }
+
+                this.revealedInlineReferences = nextRevealedInlineReferences;
 
                 for (const [from, task] of this.runningRenders.entries()) {
                     const target = activeTargets.get(from);

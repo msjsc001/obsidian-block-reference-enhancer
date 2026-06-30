@@ -95,6 +95,8 @@ You get:
 
 Hover, focus, or click the rendered reference to keep a small `Back` button visible and jump to the source block.
 
+If the cursor leaves that reference again, the inline reference automatically returns to its rendered state shortly after.
+
 ### Block embeds
 
 `{{embed ((uuid))}}` is rendered as the target block plus its children.
