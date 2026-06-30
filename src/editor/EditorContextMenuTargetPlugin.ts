@@ -2,6 +2,7 @@ import { editorInfoField } from 'obsidian';
 import type { Extension } from '@codemirror/state';
 import { EditorView, ViewPlugin } from '@codemirror/view';
 import type BlockReferenceEnhancer from '../main';
+import { isDomNode, isHtmlElement } from '../utils/dom';
 
 export interface EditorContextMenuTarget {
 	filePath: string;
@@ -68,14 +69,14 @@ function resolveContextMenuLineFromView(view: EditorView, event: MouseEvent): nu
 
 	try {
 		const target = event.target;
-		if (!(target instanceof Node) || !view.contentDOM.contains(target)) {
+		if (!isDomNode(target) || !view.contentDOM.contains(target)) {
 			return null;
 		}
 
-		const lineElement = target instanceof Element
+		const lineElement = isHtmlElement(target)
 			? target.closest('.cm-line')
 			: target.parentElement?.closest('.cm-line');
-		if (!(lineElement instanceof HTMLElement)) {
+		if (!isHtmlElement(lineElement)) {
 			return null;
 		}
 

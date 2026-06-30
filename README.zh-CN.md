@@ -366,6 +366,10 @@ npm run build
 - `manifest.json`
 - `styles.css`
 
+社区审核兼容性：
+- 不可见的 source-anchor widget 现在统一通过 CSS 类设置样式，不再使用内联 style 赋值
+- 编辑器 DOM 命中判断优先复用跨窗口安全的 helper，用于右键定位和大纲贴入解析
+
 发布说明：
 - GitHub Release 需要上传 `main.js`、`manifest.json`、`styles.css`
 - 面向 Obsidian 社区插件发布时，tag 建议直接使用精确版本号，例如 `1.1.3`

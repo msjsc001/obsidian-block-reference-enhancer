@@ -362,6 +362,10 @@ Build artifacts:
 - `manifest.json`
 - `styles.css`
 
+Community review compatibility:
+- invisible source-anchor widgets are styled through CSS classes instead of inline style assignment
+- editor DOM checks prefer cross-window-safe helpers for menu targeting and outline paste parsing
+
 Release notes:
 - GitHub releases should attach `main.js`, `manifest.json`, and `styles.css`.
 - Community-plugin releases should use an exact numeric tag such as `1.1.3`, without a `v` prefix.

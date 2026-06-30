@@ -1,4 +1,5 @@
 import { measureIndentColumns } from '../utils/markdownFence';
+import { isHtmlElement } from '../utils/dom';
 
 const LIST_ITEM_REGEX = /^(\s*)(?:[-*+•◦▪](?:\s+(.*)|\s*)|\d+[.)]\s+(.*))$/;
 const HEADING_REGEX = /^(\s*)(#{1,6})\s+(.*)$/;
@@ -192,7 +193,7 @@ function createRuntimeLimits(options: OutlinePasteParserOptions): RuntimeLimits 
 		timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
 		yieldBudgetMs: options.yieldBudgetMs ?? DEFAULT_YIELD_BUDGET_MS,
 		now,
-		yieldToMainThread: options.yieldToMainThread ?? (() => new Promise((resolve) => setTimeout(resolve, 0))),
+		yieldToMainThread: options.yieldToMainThread ?? (() => new Promise((resolve) => window.setTimeout(resolve, 0))),
 		startedAt: now(),
 		lastYieldAt: now(),
 	};
@@ -400,7 +401,7 @@ async function parseHtmlBlocks(
 			continue;
 		}
 
-		if (!(node instanceof Element)) {
+		if (!isHtmlElement(node)) {
 			continue;
 		}
 

@@ -499,6 +499,16 @@
     font-family: var(--font-monospace);
 }
 
+.block-reference-source-anchor {
+    display: inline-block;
+    width: 0;
+    min-width: 0;
+    height: 1em;
+    overflow: hidden;
+    pointer-events: none;
+    vertical-align: baseline;
+}
+
 .block-reference-enhancer-warning {
     margin-bottom: 0.5em;
     color: var(--text-muted);

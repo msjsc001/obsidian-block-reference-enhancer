@@ -1,7 +1,9 @@
 import type { Rect } from "@codemirror/view";
 import { isHtmlElement } from "./dom";
 
-function toRect(rect: DOMRect | ClientRect): Rect {
+type RectLike = Pick<DOMRectReadOnly, "left" | "right" | "top" | "bottom">;
+
+function toRect(rect: RectLike): Rect {
     return {
         left: rect.left,
         right: rect.right,
