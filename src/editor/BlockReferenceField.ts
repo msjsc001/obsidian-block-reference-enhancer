@@ -1,5 +1,6 @@
 import { StateField, StateEffect, Transaction } from "@codemirror/state";
 import { Decoration, DecorationSet, EditorView } from "@codemirror/view";
+import { BlockReferenceSourceAnchorWidget } from "./BlockReferenceSourceAnchorWidget";
 import { BlockReferenceWidget, BlockRenderMode, BlockWidgetInteraction } from "./BlockReferenceWidget";
 
 // --- 消息定义 (StateEffects) ---
@@ -40,6 +41,7 @@ export const blockReferenceField = StateField.define<DecorationSet>({
 
                 if (mode === "embed" && interaction?.cardPos !== undefined) {
                     const source = Decoration.replace({
+                        widget: new BlockReferenceSourceAnchorWidget(),
                         blockRefId: refId,
                         blockRefRole: "source",
                         blockRefSignature: signature,
@@ -88,6 +90,7 @@ export const blockReferenceField = StateField.define<DecorationSet>({
 
                 if (mode === "embed" && interaction?.cardPos !== undefined) {
                     const source = Decoration.replace({
+                        widget: new BlockReferenceSourceAnchorWidget(),
                         blockRefId: refId,
                         blockRefRole: "source",
                         blockRefSignature: signature,

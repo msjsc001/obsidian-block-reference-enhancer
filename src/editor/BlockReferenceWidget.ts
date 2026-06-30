@@ -1,6 +1,7 @@
 import { EditorView, WidgetType } from "@codemirror/view";
 import { createBlockReferenceActionButtonsElement } from "src/ui/BlockReferenceActionButtonsElement";
 import { replaceChildrenFromHtml } from "src/utils/html";
+import { measureWidgetCoords } from "src/utils/widgetCoords";
 
 export type BlockRenderMode = "inline" | "embed";
 export interface BlockWidgetInteraction {
@@ -65,6 +66,10 @@ export class BlockReferenceWidget extends WidgetType {
         }
 
         return event.type !== "mousedown";
+    }
+
+    coordsAt(dom: HTMLElement, pos: number, side: number) {
+        return measureWidgetCoords(dom, pos, side);
     }
 
     private applyReferenceDatasets(container: HTMLElement) {
@@ -199,6 +204,13 @@ export class BlockReferenceWidget extends WidgetType {
             container.className = "block-reference-enhancer-widget block-reference-inline-ref";
         }
         this.applyReferenceDatasets(container);
+
+        if (this.interaction?.availableInlineWidthPx !== undefined) {
+            container.style.setProperty(
+                "--block-reference-inline-available-width-px",
+                `${this.interaction.availableInlineWidthPx}px`,
+            );
+        }
 
         if (this.interaction?.stale) {
             container.addClass("is-stale");

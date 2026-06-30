@@ -64,6 +64,7 @@ interface ListEmbedOverlayEntry {
 
 interface InlineEmbedWidthGeometry {
     availableWidthPx: number;
+    contentWidthPx: number;
 }
 
 interface VisibleWidgetState {
@@ -77,9 +78,9 @@ interface RevealedInlineReferenceState {
     to: number;
 }
 
-interface VisibleScanRange {
-    from: number;
-    to: number;
+interface VisibleLineRange {
+    fromLine: number;
+    toLine: number;
 }
 
 const EMBED_BLOCK_REF_REGEX = /\{\{embed\s+\(\(([A-Za-z0-9_-]{36,})\)\)\s*\}\}/y;
@@ -92,8 +93,12 @@ const EMBED_PLACEHOLDER_LINE_HEIGHT_PX = 22;
 const EMBED_PLACEHOLDER_BASE_HEIGHT_PX = 24;
 const EMBED_PLACEHOLDER_MIN_LINES = 2;
 const EMBED_PLACEHOLDER_MAX_LINES = 10;
-const VISIBLE_SCAN_MARGIN_LINES = 12;
+const INLINE_WIDGET_ACTIVATION_MARGIN_LINES = 12;
+const INLINE_WIDGET_RETENTION_MARGIN_LINES = 96;
+const EMBED_WIDGET_SCAN_MARGIN_LINES = 12;
+const MAX_INLINE_WIDGETS_PER_SCAN = 12;
 const MAX_CONCURRENT_EMBED_RENDERS = 2;
+const INLINE_WIDGET_WIDTH_SAFETY_PX = 16;
 
 function normalizeMeasuredPx(value?: number): number {
     if (value === undefined || !Number.isFinite(value)) {
@@ -308,6 +313,7 @@ export function createAsyncBlockRendererPlugin(plugin: BlockReferenceEnhancer) {
                 if (update.docChanged) {
                     this.cachedTargetsDirty = true;
                     this.documentScanVersion += 1;
+                    this.inlineEmbedWidthCache.clear();
                     this.scheduleScan(LIVE_PREVIEW_DOC_SCAN_DEBOUNCE_MS);
                     return;
                 }
@@ -528,32 +534,50 @@ export function createAsyncBlockRendererPlugin(plugin: BlockReferenceEnhancer) {
                 };
             }
 
-            private measureInlineEmbedWidth(target: BlockRenderTarget): InlineEmbedWidthGeometry | null {
-                const anchorCoords = this.view.coordsAtPos(target.from);
+            private measureInlineWidgetWidth(target: BlockRenderTarget): InlineEmbedWidthGeometry | null {
                 const contentRect = this.view.contentDOM.getBoundingClientRect();
-                if (!anchorCoords || contentRect.width <= 0) {
+                if (contentRect.width <= 0) {
                     return null;
                 }
 
-                const availableWidthPx = Math.max(
-                    Math.round(contentRect.right - anchorCoords.left - 8),
-                    0,
-                );
+                const refId = getTargetRefId(target);
+                const contentWidthPx = Math.max(Math.floor(contentRect.width / 4) * 4, 0);
+                const cachedWidth = this.inlineEmbedWidthCache.get(refId);
+                if (cachedWidth) {
+                    const widthDeltaPx = contentWidthPx - cachedWidth.contentWidthPx;
+                    return {
+                        availableWidthPx: Math.max(cachedWidth.availableWidthPx + widthDeltaPx, 0),
+                        contentWidthPx,
+                    };
+                }
+
+                const anchorCoords = this.view.coordsAtPos(target.from);
+                if (!anchorCoords) {
+                    return null;
+                }
+
+                // Keep the widget below the exact line boundary. A width that only
+                // fits by a fractional pixel can move to the next CM visual line
+                // during scroll remeasurement and lose the list indentation.
+                const rawAvailableWidthPx = contentRect.right
+                    - anchorCoords.left
+                    - INLINE_WIDGET_WIDTH_SAFETY_PX;
+                const availableWidthPx = Math.max(Math.floor(rawAvailableWidthPx / 4) * 4, 0);
 
                 if (availableWidthPx <= 0) {
                     return null;
                 }
 
-                return { availableWidthPx };
+                return { availableWidthPx, contentWidthPx };
             }
 
             private measureRenderTarget(target: BlockRenderTarget): BlockRenderTarget {
                 const reservedHeightPx = this.getReservedHeightPx(target);
                 const stale = plugin.indexService.getBlockStatus(target.uuid) === "stale";
 
-                if (target.preserveListMarker) {
+                if (target.mode === "inline" || target.preserveListMarker) {
                     const refId = getTargetRefId(target);
-                    const measuredWidth = this.measureInlineEmbedWidth(target);
+                    const measuredWidth = this.measureInlineWidgetWidth(target);
                     if (measuredWidth) {
                         this.inlineEmbedWidthCache.set(refId, measuredWidth);
                     }
@@ -659,34 +683,60 @@ export function createAsyncBlockRendererPlugin(plugin: BlockReferenceEnhancer) {
                 this.cachedTargetsDirty = false;
             }
 
-            private expandRangeByLineMargin(from: number, to: number): VisibleScanRange {
+            private expandVisibleRangeByLineMargin(from: number, to: number, marginLines: number): VisibleLineRange {
                 const doc = this.view.state.doc;
-                const fromLine = Math.max(1, doc.lineAt(from).number - VISIBLE_SCAN_MARGIN_LINES);
-                const toLine = Math.min(doc.lines, doc.lineAt(Math.max(from, to - 1)).number + VISIBLE_SCAN_MARGIN_LINES);
-
-                return {
-                    from: doc.line(fromLine).from,
-                    to: doc.line(toLine).to,
-                };
+                const fromLine = Math.max(1, doc.lineAt(from).number - marginLines);
+                const toLine = Math.min(doc.lines, doc.lineAt(Math.max(from, to - 1)).number + marginLines);
+                return { fromLine, toLine };
             }
 
-            private getVisibleScanRanges(): VisibleScanRange[] {
-                if (this.view.visibleRanges.length > 0) {
-                    return this.view.visibleRanges.map((range) => this.expandRangeByLineMargin(range.from, range.to));
-                }
+            private getVisibleLineRanges(marginLines: number): VisibleLineRange[] {
+                const sourceRanges = this.view.visibleRanges.length > 0
+                    ? this.view.visibleRanges
+                    : [this.view.viewport];
 
-                const viewport = this.view.viewport;
-                return [this.expandRangeByLineMargin(viewport.from, viewport.to)];
+                return sourceRanges.map((range) => this.expandVisibleRangeByLineMargin(range.from, range.to, marginLines));
             }
 
-            private isTargetInVisibleScanRanges(target: BlockRenderTarget, ranges: VisibleScanRange[]) {
+            private getTargetLineNumber(target: BlockRenderTarget): number {
+                return this.view.state.doc.lineAt(target.from).number;
+            }
+
+            private isTargetInVisibleLineRanges(target: BlockRenderTarget, ranges: VisibleLineRange[]) {
+                const lineNumber = this.getTargetLineNumber(target);
                 for (const range of ranges) {
-                    if (target.to >= range.from && target.from <= range.to) {
+                    if (lineNumber >= range.fromLine && lineNumber <= range.toLine) {
                         return true;
                     }
                 }
 
                 return false;
+            }
+
+            private getViewportCenterLine(): number {
+                const sourceRanges = this.view.visibleRanges.length > 0
+                    ? this.view.visibleRanges
+                    : [this.view.viewport];
+                const doc = this.view.state.doc;
+                const firstRange = sourceRanges[0];
+                const lastRange = sourceRanges[sourceRanges.length - 1];
+                const firstLine = doc.lineAt(firstRange.from).number;
+                const lastLine = doc.lineAt(Math.max(lastRange.from, lastRange.to - 1)).number;
+                return Math.round((firstLine + lastLine) / 2);
+            }
+
+            private sortInlineTargetsByViewportPriority(targets: BlockRenderTarget[]): BlockRenderTarget[] {
+                const centerLine = this.getViewportCenterLine();
+
+                return [...targets].sort((left, right) => {
+                    const leftDistance = Math.abs(this.getTargetLineNumber(left) - centerLine);
+                    const rightDistance = Math.abs(this.getTargetLineNumber(right) - centerLine);
+                    if (leftDistance !== rightDistance) {
+                        return leftDistance - rightDistance;
+                    }
+
+                    return left.from - right.from;
+                });
             }
 
             private pumpEmbedRenderQueue() {
@@ -886,7 +936,9 @@ export function createAsyncBlockRendererPlugin(plugin: BlockReferenceEnhancer) {
 
             scanAndRender() {
                 this.ensureTargetsUpToDate();
-                const visibleScanRanges = this.getVisibleScanRanges();
+                const inlineActivationRanges = this.getVisibleLineRanges(INLINE_WIDGET_ACTIVATION_MARGIN_LINES);
+                const inlineRetentionRanges = this.getVisibleLineRanges(INLINE_WIDGET_RETENTION_MARGIN_LINES);
+                const embedVisibleRanges = this.getVisibleLineRanges(EMBED_WIDGET_SCAN_MARGIN_LINES);
                 const selectionFingerprint = this.view.state.selection.ranges
                     .map((range) => `${range.from}:${range.to}`)
                     .join("|");
@@ -896,7 +948,7 @@ export function createAsyncBlockRendererPlugin(plugin: BlockReferenceEnhancer) {
                 const contentWidth = Math.round(this.view.contentDOM.getBoundingClientRect().width);
                 const scanFingerprint = [
                     this.documentScanVersion,
-                    visibleScanRanges.map((range) => `${range.from}-${range.to}`).join("|"),
+                    inlineActivationRanges.map((range) => `${range.fromLine}-${range.toLine}`).join("|"),
                     selectionFingerprint,
                     this.revealedEmbedPos ?? -1,
                     revealedInlineFingerprint,
@@ -912,34 +964,55 @@ export function createAsyncBlockRendererPlugin(plugin: BlockReferenceEnhancer) {
                 this.lastScanFingerprint = scanFingerprint;
                 this.syncRevealedEmbedTarget(this.cachedTargets);
                 const indexRevision = plugin.indexService.getIndexRevision();
-                const targets = this.cachedTargets
-                    .filter((target) => this.isTargetInVisibleScanRanges(target, visibleScanRanges))
-                    .map((target) => ({
-                        ...this.measureRenderTarget(target),
-                        indexRevision,
-                    }));
-                const activeTargets = new Map<number, BlockRenderTarget>();
+                const desiredTargets: BlockRenderTarget[] = [];
                 const nextRevealedInlineReferences = new Map<string, RevealedInlineReferenceState>();
 
-                for (const target of targets) {
-                    const revealSource = this.shouldRevealSource(target);
+                for (const target of this.cachedTargets) {
+                    const refId = getTargetRefId(target);
+                    const isDesired = target.mode === "embed"
+                        ? this.isTargetInVisibleLineRanges(target, embedVisibleRanges)
+                        : this.isTargetInVisibleLineRanges(target, inlineActivationRanges)
+                            || (this.visibleWidgetStates.has(refId) && this.isTargetInVisibleLineRanges(target, inlineRetentionRanges));
+
+                    if (!isDesired) {
+                        continue;
+                    }
+
+                    const measuredTarget = {
+                        ...this.measureRenderTarget(target),
+                        indexRevision,
+                    };
+                    const revealSource = this.shouldRevealSource(measuredTarget);
                     if (revealSource) {
-                        if (target.mode === "inline") {
-                            nextRevealedInlineReferences.set(getTargetRefId(target), {
-                                from: target.from,
-                                to: target.to,
+                        if (measuredTarget.mode === "inline") {
+                            nextRevealedInlineReferences.set(getTargetRefId(measuredTarget), {
+                                from: measuredTarget.from,
+                                to: measuredTarget.to,
                             });
                         }
                         continue;
                     }
 
-                    activeTargets.set(target.from, target);
+                    if ((measuredTarget.mode === "inline" || measuredTarget.preserveListMarker)
+                        && measuredTarget.availableInlineWidthPx === undefined) {
+                        // Avoid rendering inline widgets with a synthetic 100% width fallback.
+                        // Waiting for a real measurement is cheaper than reflowing a bad layout.
+                        continue;
+                    }
+
+                    desiredTargets.push(measuredTarget);
                 }
 
                 this.revealedInlineReferences = nextRevealedInlineReferences;
+                const desiredTargetsByFrom = new Map<number, BlockRenderTarget>();
+                const desiredTargetsByRefId = new Map<string, BlockRenderTarget>();
+                for (const target of desiredTargets) {
+                    desiredTargetsByFrom.set(target.from, target);
+                    desiredTargetsByRefId.set(getTargetRefId(target), target);
+                }
 
                 for (const [from, task] of this.runningRenders.entries()) {
-                    const target = activeTargets.get(from);
+                    const target = desiredTargetsByFrom.get(from);
                     if (!target || task.signature !== buildRenderSignature(target)) {
                         task.controller.abort();
                         this.runningRenders.delete(from);
@@ -949,18 +1022,9 @@ export function createAsyncBlockRendererPlugin(plugin: BlockReferenceEnhancer) {
                 const removeEffects: Array<ReturnType<typeof removeWidgetEffect.of>> = [];
                 const nextVisibleWidgetStates = new Map<string, VisibleWidgetState>();
 
-                for (const target of activeTargets.values()) {
-                    const refId = getTargetRefId(target);
-                    nextVisibleWidgetStates.set(refId, {
-                        from: target.from,
-                        to: target.to,
-                        signature: buildTargetSignature(target),
-                    });
-                }
-
                 for (const [refId, previousState] of this.visibleWidgetStates.entries()) {
-                    const nextState = nextVisibleWidgetStates.get(refId);
-                    if (nextState && nextState.signature === previousState.signature) {
+                    const target = desiredTargetsByRefId.get(refId);
+                    if (target && buildTargetSignature(target) === previousState.signature) {
                         continue;
                     }
 
@@ -972,17 +1036,27 @@ export function createAsyncBlockRendererPlugin(plugin: BlockReferenceEnhancer) {
                 }
 
                 this.pendingEmbedRenderQueue = [];
+                const inlineTargetsToRender: BlockRenderTarget[] = [];
                 const inlineRenderEffects: Array<ReturnType<typeof setRenderedWidgetEffect.of>> = [];
                 const embedLoadingEffects: Array<ReturnType<typeof addLoadingWidgetEffect.of>> = [];
-                for (const target of activeTargets.values()) {
+                for (const target of desiredTargets) {
                     const refId = getTargetRefId(target);
                     const previousState = this.visibleWidgetStates.get(refId);
-                    const nextState = nextVisibleWidgetStates.get(refId);
+                    const nextState = {
+                        from: target.from,
+                        to: target.to,
+                        signature: buildTargetSignature(target),
+                    };
                     const isUnchanged = previousState !== undefined
-                        && nextState !== undefined
                         && previousState.signature === nextState.signature;
 
-                    if (isUnchanged || this.runningRenders.has(target.from)) {
+                    if (isUnchanged) {
+                        nextVisibleWidgetStates.set(refId, nextState);
+                        continue;
+                    }
+
+                    if (target.mode === "embed" && this.runningRenders.has(target.from)) {
+                        nextVisibleWidgetStates.set(refId, nextState);
                         continue;
                     }
 
@@ -995,9 +1069,19 @@ export function createAsyncBlockRendererPlugin(plugin: BlockReferenceEnhancer) {
                             mode: "embed",
                             interaction: this.createEmbedInteraction(target, buildTargetSignature(target)),
                         }));
+                        nextVisibleWidgetStates.set(refId, nextState);
                         continue;
                     }
 
+                    inlineTargetsToRender.push(target);
+                }
+
+                const prioritizedInlineTargets = this.sortInlineTargetsByViewportPriority(inlineTargetsToRender);
+                const inlineTargetsForThisPass = prioritizedInlineTargets.slice(0, MAX_INLINE_WIDGETS_PER_SCAN);
+                const hasRemainingInlineTargets = prioritizedInlineTargets.length > inlineTargetsForThisPass.length;
+
+                for (const target of inlineTargetsForThisPass) {
+                    const refId = getTargetRefId(target);
                     const inlineInfo = plugin.getInlineReferenceInfo(target.uuid);
                     inlineRenderEffects.push(setRenderedWidgetEffect.of({
                         from: target.from,
@@ -1009,9 +1093,17 @@ export function createAsyncBlockRendererPlugin(plugin: BlockReferenceEnhancer) {
                             to: target.to,
                             revealPos: target.from,
                             stale: inlineInfo.stale,
+                            availableInlineWidthPx: target.availableInlineWidthPx,
+                            refId,
                             sourceBlockId: target.uuid,
+                            signature: buildTargetSignature(target),
                         },
                     }));
+                    nextVisibleWidgetStates.set(refId, {
+                        from: target.from,
+                        to: target.to,
+                        signature: buildTargetSignature(target),
+                    });
                 }
 
                 const immediateEffects = [
@@ -1026,6 +1118,11 @@ export function createAsyncBlockRendererPlugin(plugin: BlockReferenceEnhancer) {
 
                 this.visibleWidgetStates = nextVisibleWidgetStates;
                 this.pumpEmbedRenderQueue();
+
+                if (hasRemainingInlineTargets) {
+                    this.lastScanFingerprint = "";
+                    this.scheduleScan(16);
+                }
             }
 
             async triggerRender(target: BlockRenderTarget) {
@@ -1054,6 +1151,10 @@ export function createAsyncBlockRendererPlugin(plugin: BlockReferenceEnhancer) {
                                     to: target.to,
                                     revealPos: target.from,
                                     stale: inlineInfo.stale,
+                                    availableInlineWidthPx: target.availableInlineWidthPx,
+                                    refId: getTargetRefId(target),
+                                    sourceBlockId: target.uuid,
+                                    signature: widgetSignature,
                                 },
                             }),
                         });

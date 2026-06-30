@@ -33,6 +33,7 @@ You get:
 - Hidden Logseq-style outline property lines such as `id::`, `collapsed::`, and `hl-*::`
 - Experimental right-click outline paste for unordered-list blocks
 - Saved source-block edits automatically refresh existing references and embeds
+- Dense pages with many rendered references and embeds use a more stable inline rendering strategy to reduce scroll and tab-switch jitter
 - A local cache and block index for large vaults
 
 ## 👀 Best For
@@ -96,6 +97,8 @@ You get:
 Hover, focus, or click the rendered reference to keep a small `Back` button visible and jump to the source block.
 
 If the cursor leaves that reference again, the inline reference automatically returns to its rendered state shortly after.
+
+Dense pages with many rendered references now keep a more conservative inline-render retention window and width cache, which reduces visible churn during scrolling, tab switching, and rapid focus changes.
 
 ### Block embeds
 

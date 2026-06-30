@@ -532,27 +532,30 @@
 }
 
 .markdown-source-view.mod-cm6 .cm-content .block-reference-embed-widget.is-inline-embed.is-list-inline-embed {
-    width: auto;
+    width: var(--block-reference-inline-available-width-px);
     max-width: 100%;
     min-width: 0;
-    max-inline-size: var(--block-reference-inline-available-width-px, 100%);
+    inline-size: var(--block-reference-inline-available-width-px);
+    max-inline-size: 100%;
 }
 
 .markdown-source-view.mod-cm6 .cm-content .block-reference-embed-widget.is-inline-embed.is-list-inline-embed .block-reference-live-preview-embed-layout {
     display: inline-block;
-    width: auto;
+    width: var(--block-reference-inline-available-width-px);
     max-width: 100%;
     min-width: 0;
-    max-inline-size: var(--block-reference-inline-available-width-px, 100%);
+    inline-size: var(--block-reference-inline-available-width-px);
+    max-inline-size: 100%;
     vertical-align: top;
 }
 
 .markdown-source-view.mod-cm6 .cm-content .block-reference-embed-widget.is-inline-embed.is-list-inline-embed .block-reference-embed {
     display: block;
-    width: auto;
+    width: var(--block-reference-inline-available-width-px);
     max-width: 100%;
     min-width: 0;
-    max-inline-size: var(--block-reference-inline-available-width-px, 100%);
+    inline-size: var(--block-reference-inline-available-width-px);
+    max-inline-size: 100%;
     overflow-wrap: anywhere;
 }
 
@@ -622,6 +625,35 @@
 
 .markdown-source-view.mod-cm6 .cm-content .block-reference-inline-ref {
     font-family: var(--font-text);
+}
+
+.markdown-source-view.mod-cm6 .cm-content .block-reference-enhancer-widget.block-reference-inline-ref {
+    display: inline-block;
+    max-width: var(--block-reference-inline-available-width-px);
+    max-inline-size: var(--block-reference-inline-available-width-px);
+    min-width: 0;
+    box-sizing: border-box;
+    vertical-align: top;
+}
+
+.markdown-source-view.mod-cm6 .cm-content .block-reference-enhancer-widget.block-reference-inline-ref > .block-reference-inline-ref-text {
+    display: block;
+    min-width: 0;
+    white-space: normal;
+}
+
+.markdown-source-view.mod-cm6 .cm-content .block-reference-embed .block-reference-inline-ref {
+    display: inline-block;
+    max-width: 100%;
+    min-width: 0;
+    max-inline-size: 100%;
+    vertical-align: top;
+}
+
+.markdown-source-view.mod-cm6 .cm-content .block-reference-embed .block-reference-inline-ref-text {
+    display: block;
+    min-width: 0;
+    white-space: normal;
 }
 
 .markdown-source-view.mod-cm6 .cm-content .block-reference-source-badge-anchor {

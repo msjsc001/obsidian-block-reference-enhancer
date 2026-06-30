@@ -1,5 +1,6 @@
 import { EditorView, WidgetType } from '@codemirror/view';
 import { createSourceReferenceBadgeElement } from '../ui/SourceReferenceBadgeElement';
+import { measureWidgetCoords } from '../utils/widgetCoords';
 
 export class SourceReferenceBadgeWidget extends WidgetType {
     constructor(
@@ -20,6 +21,10 @@ export class SourceReferenceBadgeWidget extends WidgetType {
 
     ignoreEvent(): boolean {
         return false;
+    }
+
+    coordsAt(dom: HTMLElement, pos: number, side: number) {
+        return measureWidgetCoords(dom, pos, side);
     }
 
     toDOM(view: EditorView): HTMLElement {
