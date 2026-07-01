@@ -18,6 +18,8 @@ It is a display enhancer and renderer, and it also builds a local block index an
 > The GitHub repository keeps the `obsidian-` prefix only as a repository name.<br>
 > The Obsidian default theme is the baseline theme that this plugin is expected to work with correctly. Other themes are not guaranteed to render or behave correctly.
 
+<img alt="演示-20260702001852" src="https://github.com/user-attachments/assets/335cb127-b120-44fa-b23b-267ec4962072" />
+
 ## ✨ What It Does
 
 If your notes already use UUID-style blocks, this plugin makes them readable inside Obsidian without forcing you to rewrite your notes.
@@ -42,12 +44,6 @@ You get:
 - Outline-heavy Markdown vaults
 - Large vaults where source blocks and references need stable rendering
 - Users who want block references and embeds to stay readable in both Live Preview and Reading Mode
-
-<img alt="20210606180518-2" src="https://github.com/user-attachments/assets/bd3336d4-ddfe-42e8-9e24-fbe6cc5238a1" />
-
-<img alt="截图" src="https://github.com/user-attachments/assets/b69b1a35-7e31-4cf2-ae20-73ce725e7046" />
-
-<img alt="图片" src="https://github.com/user-attachments/assets/9b50225a-00ce-4078-850b-89b8397be095" />
 
 ## 🚀 Install
 
