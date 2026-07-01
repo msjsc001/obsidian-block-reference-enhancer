@@ -18,6 +18,8 @@ English documentation is available in [README.md](./README.md).
 > GitHub 仓库保留 `obsidian-` 前缀，仅用于仓库命名，不是插件 ID。<br>
 > Obsidian 默认主题是这个插件保证正常运行和显示的基准主题，其他主题不保证能正常显示或正常交互。
 
+<img alt="演示-20260702001852" src="https://github.com/user-attachments/assets/335cb127-b120-44fa-b23b-267ec4962072" />
+
 ## ✨ 这个插件能做什么
 
 如果你的笔记已经是 UUID 风格的块结构，这个插件可以让它们在 Obsidian 里更自然地工作，而不用你重写整套笔记格式。
@@ -42,12 +44,6 @@ English documentation is available in [README.md](./README.md).
 - 主要写大纲型 Markdown 笔记的用户
 - 需要在大库里稳定查看块引用、块嵌入的用户
 - 希望 Live Preview 和 Reading Mode 都能正常显示的用户
-
-<img alt="20210606180518-2" src="https://github.com/user-attachments/assets/bd3336d4-ddfe-42e8-9e24-fbe6cc5238a1" />
-
-<img alt="截图" src="https://github.com/user-attachments/assets/b69b1a35-7e31-4cf2-ae20-73ce725e7046" />
-
-<img alt="图片" src="https://github.com/user-attachments/assets/9b50225a-00ce-4078-850b-89b8397be095" />
 
 ## 🚀 安装方式
 
