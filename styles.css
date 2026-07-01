@@ -715,3 +715,39 @@
 .block-reference-hidden-property-rules-input {
     width: 100%;
 }
+
+.block-reference-suggest-row {
+    display: flex;
+    align-items: center;
+    gap: var(--size-4-2, 8px);
+    min-width: 0;
+}
+
+.block-reference-suggest-content {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.block-reference-suggest-title,
+.block-reference-suggest-filepath {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.block-reference-suggest-go-to {
+    flex: 0 0 auto;
+    visibility: hidden;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 120ms ease;
+}
+
+.suggestion-item:hover .block-reference-suggest-go-to,
+.suggestion-item.is-selected .block-reference-suggest-go-to,
+.block-reference-suggest-go-to:focus-visible {
+    visibility: visible;
+    opacity: 1;
+    pointer-events: auto;
+}

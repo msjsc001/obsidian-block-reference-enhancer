@@ -135,7 +135,9 @@ Type:
 ((
 ```
 
-This opens block autocomplete.
+This opens block autocomplete. Select a result or press `Enter` to insert `((uuid))`. Hover a result and click `Go to` to remove the current `((` query and jump directly to that source block.
+
+If Obsidian has already inserted a closing `))`, autocomplete reuses or removes that pair as appropriate instead of creating duplicate parentheses.
 
 It only searches blocks that have already been established as source blocks. This restriction is intentional for long-term vault performance.
 
@@ -385,5 +387,4 @@ Release notes:
 
 Planned directions include:
 - refine outline interactions so Enter, Delete, and related editing behaviors feel closer to dedicated professional outliner software
-- search feature: provide a plugin search view that searches real block content instead of only the raw `((uuid))` syntax
 - more block-oriented workflows built on the current index and cache foundation

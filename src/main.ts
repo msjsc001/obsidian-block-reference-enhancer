@@ -433,7 +433,11 @@ export default class BlockReferenceEnhancer extends Plugin {
 		const editorContextMenuTargetPlugin = createEditorContextMenuTargetPlugin(this);
 		this.registerEditorExtension([blockReferenceField, editorContextMenuTargetPlugin, asyncPlugin, sourceReferenceBadgePlugin, logseqPropertyHidePlugin]);
 
-		this.registerEditorSuggest(new BlockSuggest(this.app, this.indexService));
+		this.registerEditorSuggest(new BlockSuggest(
+			this.app,
+			this.indexService,
+			(block) => this.openSourceBlockLocation(block),
+		));
 
 		this.setupFileEvents();
 		this.refreshOpenMarkdownViews();
