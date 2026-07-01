@@ -2042,7 +2042,7 @@ export default class BlockReferenceEnhancer extends Plugin {
 			reusableBadge.dataset.blockRefSourceFilePath = block.filePath;
 			reusableBadge.dataset.blockRefSourceStartLine = String(block.startLine);
 			reusableBadge.setAttribute('aria-label', `Referenced ${count} times`);
-			reusableBadge.setAttribute('title', `${count} references`);
+			reusableBadge.removeAttribute('title');
 			reusableBadge.setText(String(count));
 			return;
 		}

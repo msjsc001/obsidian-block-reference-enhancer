@@ -106,6 +106,8 @@ Dense pages with many rendered references now keep a more conservative inline-re
 
 Hover, focus, or click the rendered embed to keep the same `Back` button visible and jump to the source block.
 
+The `Back`, `Delete`, and source-badge controls use a single Obsidian-style hover tooltip without a duplicate browser tooltip.
+
 ### Source badges
 
 When a source block is referenced, the plugin shows a numeric badge beside the source block in:
@@ -365,6 +367,7 @@ Build artifacts:
 Community review compatibility:
 - invisible source-anchor widgets are styled through CSS classes instead of inline style assignment
 - editor DOM checks prefer cross-window-safe helpers for menu targeting and outline paste parsing
+- the TypeScript standard-library declarations target ES2020 so modern built-ins retain correct static types during community review
 
 Release notes:
 - GitHub releases should attach `main.js`, `manifest.json`, and `styles.css`.

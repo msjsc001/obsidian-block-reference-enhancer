@@ -19,7 +19,6 @@ export function createSourceReferenceBadgeElement(
         button.dataset.blockRefSourceStartLine = String(sourceStartLine);
     }
     button.setAttribute('aria-label', `Referenced ${count} times`);
-    button.setAttribute('title', `${count} references`);
     button.setText(String(count));
     return button;
 }

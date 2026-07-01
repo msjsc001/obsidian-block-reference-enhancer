@@ -106,6 +106,8 @@ English documentation is available in [README.md](./README.md).
 
 鼠标悬浮、聚焦或点击到渲染后的嵌入上时，也会出现并保持显示同样的 `Back` 按钮，用来跳回源块。
 
+`Back`、`Delete` 和源块数字 badge 统一只显示一套 Obsidian 风格悬浮提示，不再重复出现浏览器原生提示。
+
 ### 源块右侧数字
 
 当某个源块已经被引用时，插件会在源块旁显示一个数字 badge。这个数字会在以下两种模式里都出现：
@@ -369,6 +371,7 @@ npm run build
 社区审核兼容性：
 - 不可见的 source-anchor widget 现在统一通过 CSS 类设置样式，不再使用内联 style 赋值
 - 编辑器 DOM 命中判断优先复用跨窗口安全的 helper，用于右键定位和大纲贴入解析
+- TypeScript 标准库声明升级为 ES2020，让社区审核能正确识别代码使用的现代内置 API 类型
 
 发布说明：
 - GitHub Release 需要上传 `main.js`、`manifest.json`、`styles.css`
