@@ -18,7 +18,7 @@ import { getOpeningMarkdownFenceState, isClosingMarkdownFence, type MarkdownFenc
 import { serializeChildrenToHtml } from './utils/html';
 import { BlockReferenceEnhancerSettingTab } from './ui/BlockReferenceEnhancerSettingTab';
 import { DEFAULT_HIDDEN_LOGSEQ_PROPERTY_KEYS, HiddenLogseqPropertyMatcher, buildHiddenLogseqPropertyMatcher, isHiddenLogseqPropertyKey, isHiddenLogseqPropertyLineText, parseHiddenLogseqPropertyLine } from './services/LogseqPropertyMatcher';
-import { canPasteClipboardAsOutline, pasteClipboardAsOutline } from './services/OutlinePasteController';
+import { OutlinePasteController } from './services/OutlinePasteController';
 import { canCopyCurrentLevelAndChildren, copyCurrentLevelAndChildren } from './services/OutlineSubtreeCopyController';
 import { containsUuidBlockSyntaxOutsideCode, convertUuidSelectionToText, UuidSelectionCopyError } from './services/UuidSelectionCopyService';
 import { normalizeEmbedChildrenMarkdown } from './utils/blockMarkdown';
@@ -128,6 +128,7 @@ export default class BlockReferenceEnhancer extends Plugin {
 	private lastKnownIndexStats: IndexBuildStats | null = null;
 	private startupFullRebuildPending = false;
 	private sourceReferencePopover: SourceReferencePopover | null = null;
+	private outlinePasteController: OutlinePasteController | null = null;
 	private persistedData: BlockReferenceEnhancerPersistedData = {};
 	private editorContextMenuTarget: EditorContextMenuTarget | null = null;
 	private hiddenLogseqPropertyMatcher: HiddenLogseqPropertyMatcher = buildHiddenLogseqPropertyMatcher(DEFAULT_HIDDEN_LOGSEQ_PROPERTY_KEYS);
@@ -169,6 +170,7 @@ export default class BlockReferenceEnhancer extends Plugin {
 	async onload() {
 		await this.loadSettings();
 		this.addSettingTab(new BlockReferenceEnhancerSettingTab(this.app, this));
+		this.outlinePasteController = new OutlinePasteController(this.app);
 
 		this.indexService = new IndexService(this.app, {
 			load: async () => this.persistedData.indexCache ?? null,
@@ -315,6 +317,8 @@ export default class BlockReferenceEnhancer extends Plugin {
 	}
 
 	onunload() {
+		this.outlinePasteController?.dispose();
+		this.outlinePasteController = null;
 		this.sourceReferencePopover?.destroy();
 	}
 
@@ -538,7 +542,7 @@ export default class BlockReferenceEnhancer extends Plugin {
 	}
 
 	private addPasteClipboardAsOutlineMenuItem(menu: Menu, editor: Editor, info: MarkdownView | MarkdownFileInfo, targetLine: number) {
-		if (!this.settings.enablePasteClipboardAsOutline || !canPasteClipboardAsOutline(editor, targetLine)) {
+		if (!this.settings.enablePasteClipboardAsOutline || !this.outlinePasteController?.canPaste(editor, targetLine)) {
 			return;
 		}
 
@@ -548,7 +552,7 @@ export default class BlockReferenceEnhancer extends Plugin {
 				.setIcon('list-tree')
 				.setSection('block-reference-enhancer')
 				.onClick(() => {
-					void pasteClipboardAsOutline(editor, info, targetLine);
+					void this.outlinePasteController?.paste(editor, info, targetLine);
 				});
 		});
 	}

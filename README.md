@@ -236,9 +236,14 @@ Behavior:
 - Normal `Ctrl/Cmd + V` paste is not intercepted or modified
 - HTML and plain text are converted into child outline blocks when the structure is reliable
 - Structured web / ChatGPT content is reconstructed more carefully when a paragraph introduces a following list cluster
-- Generated child outline lists use `Tab` indentation by default
+- Blank separator lines are removed so generated unordered-list blocks stay continuous
+- Clipboard spaces are used only to detect source hierarchy; every generated child level is normalized to exactly one `Tab` followed by `- `
+- Blank lines inside fenced code blocks are preserved to avoid changing pasted code
 - `Copy current level and children` copies the current level and its full subtree as raw Markdown text
-- Large or unreliable clipboard content is simplified or rejected instead of freezing the editor
+- Large but safely bounded clipboard content asks only `Process` or `Cancel`, then converts in short time slices with progress shown in the top-right notice
+- The original file and outline location are captured before processing; switching pages does not redirect the final insertion
+- If the original target is deleted or becomes ambiguous while processing, insertion is cancelled instead of writing to the wrong place
+- Content beyond the hard safety limits is rejected without inserting partial output
 
 ## 📦 First Launch and Indexing
 

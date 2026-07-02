@@ -36,7 +36,6 @@ interface UnorderedListStructureScanResult {
 export interface OutlinePasteInsertionContext {
 	insertOffset: number;
 	rootInsertionPrefix: string;
-	childIndentUnit: string;
 	lineInfo: UnorderedListLineInfo;
 }
 
@@ -124,12 +123,9 @@ export function resolveOutlinePasteInsertionContext(
 	}
 
 	const structure = scanUnorderedListStructure(lines, targetLineIndex, lineInfo, tabSize);
-	const childIndentUnit = '\t';
-
 	return {
 		insertOffset: structure.firstDirectChildFrom ?? structure.parentTailEnd,
-		rootInsertionPrefix: buildChildInsertionPrefix(lineInfo.leadingWhitespace, childIndentUnit),
-		childIndentUnit,
+		rootInsertionPrefix: buildChildInsertionPrefix(lineInfo.leadingWhitespace, '\t'),
 		lineInfo,
 	};
 }

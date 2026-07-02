@@ -15,6 +15,16 @@ const DEFAULT_MAX_DEPTH = 32;
 const DEFAULT_MAX_OUTPUT_MARKDOWN_BYTES = 512 * 1024;
 const DEFAULT_TIMEOUT_MS = 10_000;
 const DEFAULT_YIELD_BUDGET_MS = 4;
+const DEFAULT_MAX_HTML_TAGS = 5000;
+
+const LARGE_HTML_MAX_BYTES = 2 * 1024 * 1024;
+const LARGE_TEXT_MAX_BYTES = 2 * 1024 * 1024;
+const LARGE_MAX_INPUT_LINES = 20_000;
+const LARGE_MAX_HTML_TAGS = 50_000;
+const LARGE_MAX_OUTPUT_BLOCKS = 10_000;
+const LARGE_MAX_DEPTH = 64;
+const LARGE_MAX_OUTPUT_MARKDOWN_BYTES = 1024 * 1024;
+const LARGE_TIMEOUT_MS = 60_000;
 
 export interface OutlineNode {
 	text: string;
@@ -35,10 +45,31 @@ export interface OutlinePasteParserOptions {
 	maxOutputBlocks?: number;
 	maxDepth?: number;
 	maxOutputMarkdownBytes?: number;
+	maxHtmlTags?: number;
 	timeoutMs?: number;
 	yieldBudgetMs?: number;
 	now?: () => number;
 	yieldToMainThread?: () => Promise<void>;
+	onProgress?: (progress: number) => void;
+	isCancelled?: () => boolean;
+	workUnitTotal?: number;
+	preferSingleSource?: boolean;
+	skipHtml?: boolean;
+	knownHtmlStructure?: HtmlStructureInfo;
+}
+
+export type OutlinePasteLimitProfile = 'normal' | 'large';
+
+export interface OutlinePastePreflight {
+	profile: OutlinePasteLimitProfile;
+	requiresConfirmation: boolean;
+	processable: boolean;
+	preferredSource: 'html' | 'text' | null;
+	htmlBytes: number;
+	textBytes: number;
+	textLines: number;
+	htmlStructure: HtmlStructureInfo;
+	message: string | null;
 }
 
 export interface OutlineParseResult {
@@ -61,7 +92,7 @@ interface OutlineParseCandidate {
 	sourceHadStructure: boolean;
 }
 
-interface HtmlStructureInfo {
+export interface HtmlStructureInfo {
 	structuralTagCount: number;
 	totalSupportedTagCount: number;
 }
@@ -73,12 +104,17 @@ interface RuntimeLimits {
 	maxOutputBlocks: number;
 	maxDepth: number;
 	maxOutputMarkdownBytes: number;
+	maxHtmlTags: number;
 	timeoutMs: number;
 	yieldBudgetMs: number;
 	now: () => number;
 	yieldToMainThread: () => Promise<void>;
 	startedAt: number;
 	lastYieldAt: number;
+	processedWorkUnits: number;
+	workUnitTotal: number;
+	onProgress?: (progress: number) => void;
+	isCancelled?: () => boolean;
 }
 
 interface OutlineBlock {
@@ -100,11 +136,89 @@ interface ActiveParagraphCluster {
 
 export class OutlinePasteError extends Error {
 	constructor(
-		readonly code: 'empty' | 'unsupported' | 'too-large' | 'timeout',
+		readonly code: 'empty' | 'unsupported' | 'too-large' | 'timeout' | 'cancelled' | 'target-changed',
 		message: string,
 	) {
 		super(message);
 	}
+}
+
+export function inspectOutlinePasteInput(payload: OutlineClipboardPayload): OutlinePastePreflight {
+	const html = normalizeClipboardText(payload.html);
+	const text = normalizeClipboardText(payload.text);
+	const htmlBytes = html ? getUtf8ByteLength(html) : 0;
+	const textBytes = text ? getUtf8ByteLength(text) : 0;
+	const textLines = text ? text.split('\n').length : 0;
+	const htmlStructure = html ? inspectHtmlStructureBounded(html, LARGE_MAX_HTML_TAGS + 1) : emptyHtmlStructureInfo();
+	const htmlHasStructure = htmlStructure.structuralTagCount > 0;
+	const htmlLargeProcessable = !!html
+		&& htmlBytes <= LARGE_HTML_MAX_BYTES
+		&& htmlStructure.totalSupportedTagCount <= LARGE_MAX_HTML_TAGS;
+	const textLargeProcessable = !!text
+		&& textBytes <= LARGE_TEXT_MAX_BYTES
+		&& textLines <= LARGE_MAX_INPUT_LINES;
+	const preferredSource = htmlHasStructure && htmlLargeProcessable
+		? 'html'
+		: textLargeProcessable
+			? 'text'
+			: null;
+
+	if (!preferredSource) {
+		return {
+			profile: 'large',
+			requiresConfirmation: false,
+			processable: false,
+			preferredSource: null,
+			htmlBytes,
+			textBytes,
+			textLines,
+			htmlStructure,
+			message: 'Clipboard content exceeds the safe outline-paste limit.',
+		};
+	}
+
+	const preferredSourceIsNormal = preferredSource === 'html'
+		? htmlBytes <= DEFAULT_HTML_MAX_BYTES && htmlStructure.totalSupportedTagCount <= DEFAULT_MAX_HTML_TAGS
+		: textBytes <= DEFAULT_TEXT_MAX_BYTES && textLines <= DEFAULT_MAX_INPUT_LINES;
+
+	return {
+		profile: preferredSourceIsNormal ? 'normal' : 'large',
+		requiresConfirmation: !preferredSourceIsNormal,
+		processable: true,
+		preferredSource,
+		htmlBytes,
+		textBytes,
+		textLines,
+		htmlStructure,
+		message: preferredSource === 'text' && htmlHasStructure
+			? 'The HTML representation is too large, so processing will use clipboard text.'
+			: null,
+	};
+}
+
+export function createOutlinePasteParserOptions(
+	preflight: OutlinePastePreflight,
+	overrides: Pick<OutlinePasteParserOptions, 'htmlToMarkdown'>
+		& Partial<Pick<OutlinePasteParserOptions, 'onProgress' | 'isCancelled'>>,
+): OutlinePasteParserOptions {
+	const large = preflight.profile === 'large';
+	return {
+		...overrides,
+		htmlMaxBytes: large ? LARGE_HTML_MAX_BYTES : DEFAULT_HTML_MAX_BYTES,
+		textMaxBytes: large ? LARGE_TEXT_MAX_BYTES : DEFAULT_TEXT_MAX_BYTES,
+		maxInputLines: large ? LARGE_MAX_INPUT_LINES : DEFAULT_MAX_INPUT_LINES,
+		maxHtmlTags: large ? LARGE_MAX_HTML_TAGS : DEFAULT_MAX_HTML_TAGS,
+		maxOutputBlocks: large ? LARGE_MAX_OUTPUT_BLOCKS : DEFAULT_MAX_OUTPUT_BLOCKS,
+		maxDepth: large ? LARGE_MAX_DEPTH : DEFAULT_MAX_DEPTH,
+		maxOutputMarkdownBytes: large ? LARGE_MAX_OUTPUT_MARKDOWN_BYTES : DEFAULT_MAX_OUTPUT_MARKDOWN_BYTES,
+		timeoutMs: large ? LARGE_TIMEOUT_MS : DEFAULT_TIMEOUT_MS,
+		workUnitTotal: Math.max(1, preflight.preferredSource === 'html'
+			? preflight.htmlStructure.totalSupportedTagCount
+			: preflight.textLines),
+		preferSingleSource: large,
+		skipHtml: preflight.preferredSource === 'text',
+		knownHtmlStructure: preflight.htmlStructure,
+	};
 }
 
 export async function parseOutlinePasteInput(
@@ -117,28 +231,31 @@ export async function parseOutlinePasteInput(
 	const candidates: OutlineParseCandidate[] = [];
 	let lastError: OutlinePasteError | null = null;
 
-	if (html) {
+	if (html && !options.skipHtml) {
 		if (getUtf8ByteLength(html) > runtime.htmlMaxBytes) {
 			if (!text) {
 				throw new OutlinePasteError('too-large', 'Clipboard HTML content is too large for outline paste.');
 			}
 		} else {
-			const htmlStructureInfo = inspectHtmlStructure(html, runtime);
-			if (htmlStructureInfo.structuralTagCount > 0 && options.htmlToMarkdown) {
-				try {
+			try {
+				const htmlStructureInfo = options.knownHtmlStructure ?? inspectHtmlStructure(html, runtime);
+				if (htmlStructureInfo.totalSupportedTagCount > runtime.maxHtmlTags) {
+					throw new OutlinePasteError('too-large', 'Clipboard HTML structure is too large for outline paste.');
+				}
+				if (htmlStructureInfo.structuralTagCount > 0 && options.htmlToMarkdown) {
 					candidates.push(await parseHtmlCandidate(html, options.htmlToMarkdown, runtime));
-				} catch (error) {
-					if (error instanceof OutlinePasteError) {
-						lastError = error;
-					} else {
-						lastError = new OutlinePasteError('unsupported', 'Clipboard HTML content is not supported for outline paste.');
-					}
+				}
+			} catch (error) {
+				if (error instanceof OutlinePasteError) {
+					lastError = error;
+				} else {
+					lastError = new OutlinePasteError('unsupported', 'Clipboard HTML content is not supported for outline paste.');
 				}
 			}
 		}
 	}
 
-	if (text) {
+	if (text && (!options.preferSingleSource || candidates.length === 0)) {
 		if (getUtf8ByteLength(text) > runtime.textMaxBytes) {
 			if (candidates.length === 0) {
 				throw new OutlinePasteError('too-large', 'Clipboard text content is too large for outline paste.');
@@ -190,12 +307,17 @@ function createRuntimeLimits(options: OutlinePasteParserOptions): RuntimeLimits 
 		maxOutputBlocks: options.maxOutputBlocks ?? DEFAULT_MAX_OUTPUT_BLOCKS,
 		maxDepth: options.maxDepth ?? DEFAULT_MAX_DEPTH,
 		maxOutputMarkdownBytes: options.maxOutputMarkdownBytes ?? DEFAULT_MAX_OUTPUT_MARKDOWN_BYTES,
+		maxHtmlTags: options.maxHtmlTags ?? DEFAULT_MAX_HTML_TAGS,
 		timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
 		yieldBudgetMs: options.yieldBudgetMs ?? DEFAULT_YIELD_BUDGET_MS,
 		now,
 		yieldToMainThread: options.yieldToMainThread ?? (() => new Promise((resolve) => window.setTimeout(resolve, 0))),
 		startedAt: now(),
 		lastYieldAt: now(),
+		processedWorkUnits: 0,
+		workUnitTotal: Math.max(1, options.workUnitTotal ?? 1),
+		onProgress: options.onProgress,
+		isCancelled: options.isCancelled,
 	};
 }
 
@@ -205,9 +327,9 @@ async function parseHtmlCandidate(
 	runtime: RuntimeLimits,
 ): Promise<OutlineParseCandidate> {
 	checkRuntimeLimits(runtime);
-	const markdownSource = normalizeClipboardText(htmlToMarkdown(html)) ?? '';
 
 	if (typeof DOMParser === 'undefined') {
+		const markdownSource = normalizeClipboardText(htmlToMarkdown(html)) ?? '';
 		if (!markdownSource) {
 			throw new OutlinePasteError('unsupported', 'Clipboard HTML content is not supported for outline paste.');
 		}
@@ -215,10 +337,14 @@ async function parseHtmlCandidate(
 		return parseCandidate(markdownSource, 'html', true, runtime);
 	}
 
+	await runtime.yieldToMainThread();
+	checkRuntimeLimits(runtime);
 	const doc = new DOMParser().parseFromString(html, 'text/html');
+	checkRuntimeLimits(runtime);
 	const blocks = await parseHtmlBlocks(Array.from(doc.body.childNodes), htmlToMarkdown, runtime, 0, 0);
-	const nodes = materializeOutlineBlocks(blocks);
+	const nodes = sanitizeOutlineNodes(materializeOutlineBlocks(blocks));
 	if (nodes.length === 0) {
+		const markdownSource = normalizeClipboardText(htmlToMarkdown(html)) ?? '';
 		if (!markdownSource) {
 			throw new OutlinePasteError('empty', 'Clipboard is empty.');
 		}
@@ -241,7 +367,7 @@ async function parseHtmlCandidate(
 		maxDepth: stats.maxDepth,
 		mode: 'structured',
 		source: 'html',
-		markdownSource,
+		markdownSource: '',
 		sourceHadStructure: true,
 	};
 }
@@ -264,9 +390,10 @@ async function parseCandidate(
 	}
 
 	const mode = hasStructuredMarkdownHints(normalizedText) ? 'structured' : 'flat';
-	const nodes = mode === 'structured'
+	const parsedNodes = mode === 'structured'
 		? materializeOutlineBlocks(await parseStructuredBlocks(lines, runtime))
 		: await parseFlatOutline(lines, runtime);
+	const nodes = sanitizeOutlineNodes(parsedNodes);
 
 	const stats = summarizeOutlineNodes(nodes);
 	if (stats.nodeCount === 0) {
@@ -690,6 +817,15 @@ function hasStructuredMarkdownHints(text: string): boolean {
 
 function inspectHtmlStructure(html: string, runtime: RuntimeLimits): HtmlStructureInfo {
 	checkRuntimeLimits(runtime);
+	const result = inspectHtmlStructureBounded(html, runtime.maxHtmlTags + 1);
+	if (result.totalSupportedTagCount > runtime.maxHtmlTags) {
+		throw new OutlinePasteError('too-large', 'Clipboard HTML structure is too large for outline paste.');
+	}
+
+	return result;
+}
+
+function inspectHtmlStructureBounded(html: string, maxTags: number): HtmlStructureInfo {
 	let structuralTagCount = 0;
 	let totalSupportedTagCount = 0;
 	let match: RegExpExecArray | null;
@@ -701,12 +837,19 @@ function inspectHtmlStructure(html: string, runtime: RuntimeLimits): HtmlStructu
 			structuralTagCount += 1;
 		}
 
-		if (totalSupportedTagCount > runtime.maxInputLines) {
-			throw new OutlinePasteError('too-large', 'Clipboard HTML structure is too large for outline paste.');
+		if (totalSupportedTagCount >= maxTags) {
+			break;
 		}
 	}
 
 	return { structuralTagCount, totalSupportedTagCount };
+}
+
+function emptyHtmlStructureInfo(): HtmlStructureInfo {
+	return {
+		structuralTagCount: 0,
+		totalSupportedTagCount: 0,
+	};
 }
 
 function summarizeOutlineNodes(nodes: OutlineNode[]): { nodeCount: number; maxDepth: number } {
@@ -721,6 +864,109 @@ function summarizeOutlineNodes(nodes: OutlineNode[]): { nodeCount: number; maxDe
 
 	nodes.forEach((node) => visit(node, 1));
 	return { nodeCount, maxDepth };
+}
+
+function sanitizeOutlineNodes(nodes: OutlineNode[]): OutlineNode[] {
+	const sanitizedNodes: OutlineNode[] = [];
+	for (const node of nodes) {
+		const children = sanitizeOutlineNodes(node.children);
+		const continuation = sanitizeContinuationLines(node.text, node.continuation);
+		let text = node.text.trim();
+
+		if (!text && continuation.length > 0) {
+			text = continuation.shift()?.trim() ?? '';
+		}
+
+		if (!text) {
+			sanitizedNodes.push(...children);
+			continue;
+		}
+
+		sanitizedNodes.push({
+			text,
+			continuation,
+			children,
+		});
+	}
+
+	return sanitizedNodes;
+}
+
+function sanitizeContinuationLines(nodeText: string, lines: string[]): string[] {
+	const sanitizedLines: string[] = [];
+	let fencedCodeMarker = resolveFenceMarker(nodeText);
+
+	for (const rawLine of lines) {
+		const line = rawLine.trimEnd();
+		if (line.trim().length === 0) {
+			if (fencedCodeMarker) {
+				sanitizedLines.push('');
+			}
+			continue;
+		}
+
+		sanitizedLines.push(line);
+		if (fencedCodeMarker) {
+			if (isFencedCodeClosingLine(line, fencedCodeMarker)) {
+				fencedCodeMarker = null;
+			}
+			continue;
+		}
+
+		fencedCodeMarker = resolveFenceMarker(line);
+	}
+
+	return removeSharedContinuationIndent(sanitizedLines);
+}
+
+function removeSharedContinuationIndent(lines: string[]): string[] {
+	const nonBlankLines = lines.filter((line) => line.trim().length > 0);
+	if (nonBlankLines.length === 0) {
+		return lines;
+	}
+
+	const sharedIndentColumns = Math.min(...nonBlankLines.map((line) => {
+		const leadingWhitespace = line.match(/^(\s*)/)?.[1] ?? '';
+		return measureIndentColumns(leadingWhitespace, 4);
+	}));
+	if (sharedIndentColumns <= 0) {
+		return lines;
+	}
+
+	return lines.map((line) => stripLeadingIndentColumns(line, sharedIndentColumns));
+}
+
+function stripLeadingIndentColumns(line: string, columnsToRemove: number): string {
+	let index = 0;
+	let removedColumns = 0;
+	while (index < line.length && removedColumns < columnsToRemove) {
+		const char = line[index];
+		if (char === '\t') {
+			const tabWidth = 4 - (removedColumns % 4);
+			const remainingColumns = columnsToRemove - removedColumns;
+			if (tabWidth > remainingColumns) {
+				return `${' '.repeat(tabWidth - remainingColumns)}${line.slice(index + 1)}`;
+			}
+
+			removedColumns += tabWidth;
+			index += 1;
+			continue;
+		}
+
+		if (char !== ' ') {
+			break;
+		}
+
+		removedColumns += 1;
+		index += 1;
+	}
+
+	return line.slice(index);
+}
+
+function resolveFenceMarker(line: string): string | null {
+	const match = line.match(FENCED_CODE_OPENING_REGEX);
+	return match?.[1]?.[0] ?? null;
 }
 
 function createOutlineNode(text: string): OutlineNode {
@@ -787,6 +1033,10 @@ function getUtf8ByteLength(value: string): number {
 }
 
 function checkRuntimeLimits(runtime: RuntimeLimits) {
+	if (runtime.isCancelled?.()) {
+		throw new OutlinePasteError('cancelled', 'Outline paste was cancelled.');
+	}
+
 	if (runtime.now() - runtime.startedAt > runtime.timeoutMs) {
 		throw new OutlinePasteError('timeout', 'Outline paste conversion timed out.');
 	}
@@ -794,12 +1044,14 @@ function checkRuntimeLimits(runtime: RuntimeLimits) {
 
 async function maybeYield(runtime: RuntimeLimits) {
 	checkRuntimeLimits(runtime);
+	runtime.processedWorkUnits += 1;
 	const now = runtime.now();
 	if (now - runtime.lastYieldAt < runtime.yieldBudgetMs) {
 		return;
 	}
 
 	runtime.lastYieldAt = now;
+	runtime.onProgress?.(Math.min(0.95, runtime.processedWorkUnits / runtime.workUnitTotal));
 	await runtime.yieldToMainThread();
 	checkRuntimeLimits(runtime);
 }
