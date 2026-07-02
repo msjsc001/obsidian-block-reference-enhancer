@@ -1,13 +1,13 @@
 {
     "name": "obsidian-block-reference-enhancer",
-    "version": "1.3.14",
+    "version": "1.3.15",
     "description": "Render and navigate UUID-based block references and block embeds in Live Preview and Reading Mode, with Logseq-style outlines, property hiding, source badges, backlinks, and local indexing.",
     "main": "main.js",
     "scripts": {
         "dev": "node esbuild.config.mjs",
         "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
         "version": "node version-bump.mjs && git add manifest.json versions.json",
-        "test": "node scripts/test-block-suggest-range.mjs && node scripts/test-markdown-fence-compat.mjs && node scripts/test-index-cache-compat.mjs && node scripts/test-outline-paste-parser.mjs"
+        "test": "node scripts/test-block-suggest-range.mjs && node scripts/test-markdown-fence-compat.mjs && node scripts/test-index-cache-compat.mjs && node scripts/test-outline-paste-parser.mjs && node scripts/test-uuid-selection-copy.mjs"
     },
     "keywords": [],
     "author": "msjsc001",

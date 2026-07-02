@@ -32,6 +32,7 @@ You get:
 - A compact popover that shows where a block is referenced
 - Block autocomplete when typing `((`
 - Commands and editor context menu actions to copy the current block reference or block embed
+- A selection context-menu action that copies rendered UUID references and embeds as readable Markdown outline text
 - Hidden Logseq-style outline property lines such as `id::`, `collapsed::`, and `hl-*::`
 - Experimental right-click outline paste for unordered-list blocks
 - Saved source-block edits automatically refresh existing references and embeds
@@ -159,6 +160,20 @@ If the block does not already have `id:: uuid`, the plugin adds one and copies `
 
 You can also right-click the current outline block in the editor and use:
 - `Copy block embed`
+
+### `Copy selection (UUID blocks as text)`
+
+Select text in the Markdown editor that contains rendered UUID block references or block embeds, then right-click and use:
+- `Copy selection (UUID blocks as text)`
+
+This copies readable Markdown text instead of the selected `((uuid))` and `{{embed ((uuid))}}` source syntax:
+- block references use the same summary shown in Live Preview
+- standalone block embeds include the full source block and its child outline
+- an embed root gets exactly one `- ` marker, even when the selected host line already contains its own list marker
+- ordinary selected Markdown remains unchanged
+- incomplete UUID syntax and UUID-like text inside inline or fenced code remain unchanged
+
+Normal `Ctrl/Cmd + C` is not modified and still copies the original Markdown source. The conversion action is available only for one non-empty editor selection containing complete UUID block syntax.
 
 ### `Rebuild block reference index`
 

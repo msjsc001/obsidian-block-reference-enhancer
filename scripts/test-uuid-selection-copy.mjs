@@ -1,0 +1,121 @@
+import { build } from 'esbuild';
+import { mkdir, rm, writeFile } from 'node:fs/promises';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+
+const rootDir = process.cwd();
+const tempDir = path.join(rootDir, 'scripts', '.tmp-uuid-selection-copy-test');
+const entryPath = path.join(tempDir, 'entry.ts');
+const bundlePath = path.join(tempDir, 'bundle.mjs');
+const projectImport = (relativePath) => JSON.stringify(path.resolve(rootDir, relativePath).replace(/\\/g, '/'));
+
+const lines = [
+	"import assert from 'node:assert/strict';",
+	`import { containsUuidBlockSyntaxOutsideCode, convertUuidSelectionToText, UuidSelectionCopyError } from ${projectImport('src/services/UuidSelectionCopyService.ts')};`,
+	'',
+	"const ROOT = '11111111-1111-1111-1111-111111111111';",
+	"const CHILD = '22222222-2222-2222-2222-222222222222';",
+	"const MISSING = '99999999-9999-9999-9999-999999999999';",
+	'const blocks = new Map([',
+	"  [ROOT, { id: ROOT, filePath: 'root.md', rawContent: 'Root **text**\\n  note', childrenMarkdown: '\\t- Child ((22222222-2222-2222-2222-222222222222))', startLine: 0, childrenIDs: [], sourceUpdatedAt: 1, status: 'active', firstSeenAt: 1, lastSeenAt: 1 }],",
+	"  [CHILD, { id: CHILD, filePath: 'child.md', rawContent: 'Child summary', childrenMarkdown: '', startLine: 0, childrenIDs: [], sourceUpdatedAt: 1, status: 'active', firstSeenAt: 1, lastSeenAt: 1 }],",
+	']);',
+	'const resolver = {',
+	'  resolveBlock: (uuid) => blocks.get(uuid) ?? null,',
+	"  resolveInlineSummary: (uuid) => uuid === ROOT ? 'Root text' : uuid === CHILD ? 'Child summary' : null,",
+	'};',
+	'',
+	'{',
+	"  const input = 'ordinary **Markdown** text';",
+	'  const result = convertUuidSelectionToText(input, resolver);',
+	"  assert.equal(result.text, input, 'ordinary selected Markdown must remain byte-for-byte unchanged');",
+	"  assert.equal(result.replacementCount, 0);",
+	'}',
+	'',
+	'{',
+	"  const input = `before ((${CHILD})) after`;",
+	'  const result = convertUuidSelectionToText(input, resolver);',
+	"  assert.equal(result.text, 'before Child summary after');",
+	"  assert.equal(result.replacementCount, 1);",
+	'}',
+	'',
+	'{',
+	"  const result = convertUuidSelectionToText(`（（${CHILD}））`, resolver);",
+	"  assert.equal(result.text, 'Child summary', 'full-width block references should use the same summary conversion');",
+	'}',
+	'',
+	'{',
+	"  const input = `- {{embed ((${ROOT}))}}`;",
+	'  const result = convertUuidSelectionToText(input, resolver);',
+	"  assert.equal(result.text, '- Root **text**\\n  note\\n\\t- Child Child summary', 'host list marker should be reused exactly once and children should use tab indentation');",
+	"  assert.equal(result.replacementCount, 2, 'the embed and its nested inline reference should both be counted');",
+	'}',
+	'',
+	'{',
+	"  const input = `\\t- {{embed ((${ROOT}))}}`;",
+	'  const result = convertUuidSelectionToText(input, resolver);',
+	"  assert.equal(result.text, '\\t- Root **text**\\n\\t  note\\n\\t\\t- Child Child summary', 'host indentation should prefix the full expanded subtree');",
+	'}',
+	'',
+	'{',
+	"  const input = `{{embed ((${ROOT}))}}`;",
+	'  const result = convertUuidSelectionToText(input, resolver);',
+	"  assert.ok(result.text.startsWith('- Root **text**'), 'an embed selected without its host marker should synthesize one root bullet');",
+	'}',
+	'',
+	'{',
+	"  const input = `prefix {{embed ((${ROOT}))}} suffix`;",
+	'  const result = convertUuidSelectionToText(input, resolver);',
+	"  assert.equal(result.text, 'prefix Root text suffix', 'inline embeds should use the visible summary instead of injecting a multiline subtree');",
+	'}',
+	'',
+	'{',
+	"  const ref = '((' + ROOT + '))';",
+	"  const input = ['`' + ref + '`', '```md', ref, '```', ref].join('\\n');",
+	'  const result = convertUuidSelectionToText(input, resolver);',
+	"  assert.equal(result.text, ['`' + ref + '`', '```md', ref, '```', 'Root text'].join('\\n'), 'inline and fenced code must stay unchanged');",
+	"  assert.equal(result.replacementCount, 1);",
+	'}',
+	'',
+	'{',
+	"  const inlineCode = String.fromCharCode(96) + '((' + ROOT + '))' + String.fromCharCode(96);",
+	"  assert.equal(containsUuidBlockSyntaxOutsideCode(inlineCode), false);",
+	"  assert.equal(containsUuidBlockSyntaxOutsideCode(`((${ROOT}`), false);",
+	"  assert.equal(containsUuidBlockSyntaxOutsideCode(`（（${ROOT}））`), true);",
+	'}',
+	'',
+	'{',
+	"  const result = convertUuidSelectionToText(`- {{embed ((${MISSING}))}}`, resolver);",
+	"  assert.equal(result.text, '- [Missing block]');",
+	'}',
+	'',
+	'{',
+	"  const cycleId = '33333333-3333-3333-3333-333333333333';",
+	"  const cycleBlock = { id: cycleId, filePath: 'cycle.md', rawContent: 'Cycle', childrenMarkdown: `\\t- {{embed ((${cycleId}))}}`, startLine: 0, childrenIDs: [], sourceUpdatedAt: 1, status: 'active', firstSeenAt: 1, lastSeenAt: 1 };",
+	'  const cycleResolver = { resolveBlock: () => cycleBlock, resolveInlineSummary: () => null };',
+	"  const result = convertUuidSelectionToText(`- {{embed ((${cycleId}))}}`, cycleResolver);",
+	"  assert.equal(result.text, '- Cycle\\n\\t- [Cyclic block]');",
+	'}',
+	'',
+	'{',
+	"  assert.throws(() => convertUuidSelectionToText(`((${ROOT}))`, resolver, { maxOutputChars: 4 }), (error) => error instanceof UuidSelectionCopyError && error.code === 'output-too-large');",
+	'}',
+	'',
+	"console.log('UUID selection copy tests passed.');",
+];
+
+try {
+	await mkdir(tempDir, { recursive: true });
+	await writeFile(entryPath, lines.join('\n'), 'utf8');
+	await build({
+		entryPoints: [entryPath],
+		outfile: bundlePath,
+		bundle: true,
+		format: 'esm',
+		platform: 'node',
+		target: ['node18'],
+	});
+	await import(pathToFileURL(bundlePath).href);
+} finally {
+	await rm(tempDir, { recursive: true, force: true });
+}

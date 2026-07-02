@@ -32,6 +32,7 @@ English documentation is available in [README.md](./README.md).
 - 点击数字后展开的引用位置弹窗
 - 输入 `((` 后的块自动补全
 - 复制当前块引用或块嵌入的命令和右键菜单入口
+- 将框选区域里的 UUID 块引用、块嵌入复制为可读 Markdown 大纲文本的右键菜单
 - 可隐藏 Logseq 风格大纲属性行，例如 `id::`、`collapsed::`、`hl-*::`
 - 面向无序列表块的实验性“右键贴入为大纲”
 - 源块内容保存后，已有块引用和块嵌入会自动同步刷新
@@ -159,6 +160,20 @@ Obsidian 打开命令面板快捷键：
 
 你也可以在编辑器里对当前大纲块点右键，使用：
 - `Copy block embed`
+
+### `Copy selection (UUID blocks as text)`
+
+在 Markdown 编辑器里框选包含已渲染 UUID 块引用或块嵌入的内容，然后右键使用：
+- `Copy selection (UUID blocks as text)`
+
+这个操作会复制可读的 Markdown 文本，而不是框选区域里的 `((uuid))` 和 `{{embed ((uuid))}}` 源码：
+- 块引用使用与 Live Preview 当前显示一致的摘要
+- 独占一行的块嵌入会复制完整源块和子级大纲
+- 块嵌入根节点始终只有一个 `- `，不会因为宿主行已经带列表符号而重复
+- 框选区域里的普通 Markdown 保持不变
+- 不完整 UUID 语法，以及行内代码或围栏代码块里的 UUID 样式文本保持不变
+
+普通 `Ctrl/Cmd + C` 不会被修改，仍然复制原始 Markdown 源码。这个转换菜单只在编辑器存在单个非空框选，并且框选中包含完整 UUID 块语法时出现。
 
 ### `Rebuild block reference index`
 
